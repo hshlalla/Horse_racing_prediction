@@ -6,21 +6,15 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.core.config import settings
 
-_pwd_ctx = None
-
-def _get_pwd_context() -> CryptContext:
-    global _pwd_ctx
-    if _pwd_ctx is None:
-        _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
-    return _pwd_ctx
+_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 
 def hash_password(plain: str) -> str:
-    return _get_pwd_context().hash(plain)
+    return _pwd_ctx.hash(plain)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _get_pwd_context().verify(plain, hashed)
+    return _pwd_ctx.verify(plain, hashed)
 
 
 def create_access_token(user_id: int) -> str:
