@@ -4,6 +4,36 @@ from testcontainers.postgres import PostgresContainer
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from app.db.base import Base
+from app.core.config import Settings
+
+# Patch bcrypt.hashpw to handle passwords longer than 72 bytes during passlib initialization
+import bcrypt as bcrypt_module
+_original_hashpw = bcrypt_module.hashpw
+def _patched_hashpw(password, salt):
+    if isinstance(password, bytes) and len(password) > 72:
+        password = password[:72]
+    return _original_hashpw(password, salt)
+bcrypt_module.hashpw = _patched_hashpw
+
+# Initialize test settings that will be used throughout tests
+_TEST_SETTINGS = Settings(
+    DATABASE_URL="postgresql+asyncpg://test:test@localhost/test",
+    REDIS_URL="redis://localhost:6379/0",
+    JWT_SECRET="test-secret-key-32-characters-long!",
+    ENVIRONMENT="testing",
+    FIREBASE_CREDENTIALS_PATH="",
+    CRAWL_USER_AGENT="TestBot/1.0",
+    LOG_LEVEL="INFO",
+    ENABLE_DOCS=False,
+    ACCESS_TOKEN_EXPIRE_MINUTES=15,
+    REFRESH_TOKEN_EXPIRE_DAYS=30,
+)
+
+# Patch settings at import time
+import app.core.config
+import app.core.security
+app.core.config.settings = _TEST_SETTINGS
+app.core.security.settings = _TEST_SETTINGS
 
 
 @pytest.fixture(scope="session")
