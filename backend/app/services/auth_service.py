@@ -68,7 +68,7 @@ async def refresh(db: AsyncSession, refresh_raw: str) -> tuple[str, str]:
         await db.commit()
         raise InvalidRefreshToken("token reuse detected")
 
-    if session.expires_at.replace(tzinfo=datetime.UTC) < now:
+    if session.expires_at.astimezone(datetime.UTC) < now:
         raise InvalidRefreshToken("expired")
 
     # Revoke old token
