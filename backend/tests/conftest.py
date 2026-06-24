@@ -26,6 +26,10 @@ import app.core.security
 app.core.config.settings = _TEST_SETTINGS
 app.core.security.settings = _TEST_SETTINGS
 
+# Import all models so Base.metadata is fully populated before create_all
+import app.db.models.users  # noqa: F401, E402
+import app.db.models.crawl  # noqa: F401, E402
+
 
 @pytest.fixture(scope="session")
 def postgres_url():
