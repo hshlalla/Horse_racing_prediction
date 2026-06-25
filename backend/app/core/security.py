@@ -18,11 +18,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int) -> str:
-    expire = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
     return jwt.encode(
-        {"sub": str(user_id), "exp": expire, "iat": datetime.datetime.now(datetime.UTC)},
+        {"sub": str(user_id), "exp": expire, "iat": datetime.datetime.now(datetime.timezone.utc)},
         settings.JWT_SECRET,
         algorithm="HS256",
     )

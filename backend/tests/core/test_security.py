@@ -22,7 +22,7 @@ def test_expired_token_raises():
     from jose import jwt as jose_jwt
     import datetime
     from app.core.config import settings
-    past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1)
+    past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
     token = jose_jwt.encode(
         {"sub": "1", "exp": past, "iat": past},
         settings.JWT_SECRET,

@@ -53,7 +53,7 @@ async def refresh(db: AsyncSession, refresh_raw: str) -> tuple[str, str]:
         select(Session).where(Session.refresh_token_hash == token_hash)
     )
     session = result.scalar_one_or_none()
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(datetime.timezone.utc)
 
     if session is None:
         raise InvalidRefreshToken("not found")
@@ -68,7 +68,7 @@ async def refresh(db: AsyncSession, refresh_raw: str) -> tuple[str, str]:
         await db.commit()
         raise InvalidRefreshToken("token reuse detected")
 
-    if session.expires_at.astimezone(datetime.UTC) < now:
+    if session.expires_at.astimezone(datetime.timezone.utc) < now:
         raise InvalidRefreshToken("expired")
 
     # Revoke old token
@@ -98,7 +98,7 @@ async def logout(db: AsyncSession, refresh_raw: str) -> None:
     )
     session = result.scalar_one_or_none()
     if session:
-        session.revoked_at = datetime.datetime.now(datetime.UTC)
+        session.revoked_at = datetime.datetime.now(datetime.timezone.utc)
         await db.commit()
 
 
@@ -107,7 +107,7 @@ async def _issue_tokens(db: AsyncSession, user: User) -> tuple[str, str]:
     session = Session(
         user_id=user.id,
         refresh_token_hash=hashed,
-        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+        expires_at=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
             days=settings.REFRESH_TOKEN_EXPIRE_DAYS
         ),
         family_id=str(uuid.uuid4()),

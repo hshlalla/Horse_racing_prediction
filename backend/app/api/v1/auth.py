@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Cookie, Depends, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 
 from app.api.deps import get_db
 from app.core.errors import error_response
@@ -60,7 +61,7 @@ async def login(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
     response: Response,
-    rt: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    rt: Optional[str] = Cookie(default=None, alias=COOKIE_NAME),
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(auth_rate_limit),
 ):
@@ -77,7 +78,7 @@ async def refresh(
 @router.post("/logout", status_code=204)
 async def logout(
     response: Response,
-    rt: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    rt: Optional[str] = Cookie(default=None, alias=COOKIE_NAME),
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(auth_rate_limit),
 ):

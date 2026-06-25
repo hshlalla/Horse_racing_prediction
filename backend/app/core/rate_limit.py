@@ -3,7 +3,8 @@ import redis.asyncio as aioredis
 from fastapi import Request, HTTPException, status
 from app.core.config import settings
 
-_redis: aioredis.Redis | None = None
+from typing import Optional
+_redis: Optional[aioredis.Redis] = None
 
 
 def _get_redis() -> aioredis.Redis:

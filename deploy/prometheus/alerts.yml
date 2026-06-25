@@ -1,0 +1,10 @@
+groups:
+- name: example
+  rules:
+  - alert: HighErrorRate
+    expr: job:request_error_rate{job="backend"} > 0.05
+    for: 5m
+    labels:
+      severity: page
+    annotations:
+      summary: High request error rate

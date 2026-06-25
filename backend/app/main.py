@@ -37,7 +37,13 @@ async def _readyz_check() -> dict[str, str]:
 async def lifespan(app: FastAPI):
     configure_logging(settings.LOG_LEVEL)
     log.info("startup", environment=settings.ENVIRONMENT)
+    
+    from app.scheduler.jobs import setup_scheduler, scheduler
+    setup_scheduler()
+    
     yield
+    
+    scheduler.shutdown()
     log.info("shutdown")
 
 
