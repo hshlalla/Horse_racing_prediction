@@ -16,3 +16,16 @@ async def register_device(db: AsyncSession, user_id: int, fcm_token: str, platfo
     db.add(device)
     await db.commit()
     return device
+
+
+async def unregister_device(db: AsyncSession, user_id: int, device_id: int) -> bool:
+    result = await db.execute(
+        select(Device).where(Device.id == device_id, Device.user_id == user_id)
+    )
+    device = result.scalar_one_or_none()
+    if not device:
+        return False
+    await db.delete(device)
+    await db.commit()
+    return True
+

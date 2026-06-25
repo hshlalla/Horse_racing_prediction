@@ -69,7 +69,13 @@ def create_app() -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         return response
 
+    from app.core.errors import overflow_exception_handler
+    app.add_exception_handler(OverflowError, overflow_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
+
+    # Prometheus metrics
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
     # Health endpoints
     @app.get("/healthz", tags=["ops"])

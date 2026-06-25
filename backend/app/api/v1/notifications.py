@@ -20,3 +20,17 @@ async def register_device(
 ):
     await notification_service.register_device(db, current_user.id, body.fcm_token, body.platform)
     return {"status": "ok"}
+
+
+@router.delete("/{device_id}", status_code=204)
+async def unregister_device(
+    device_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    removed = await notification_service.unregister_device(db, current_user.id, device_id)
+    if not removed:
+        from app.core.errors import error_response
+        return error_response("DEVICE_NOT_FOUND", "Device not found", 404)
+    return None
+

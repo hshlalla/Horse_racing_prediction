@@ -30,11 +30,16 @@ android/app/build/
 android/local.properties
 android/*.iml
 android/.idea/
+android/app/google-services.json
 
 # Environment files
 .env
 .env.*
 !*.example
+
+# Test & Debug
+backend/.hypothesis/
+backend/test_dod.db
 
 # IDE
 .vscode/

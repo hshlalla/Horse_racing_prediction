@@ -6,6 +6,12 @@ def error_response(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
 
 
+async def overflow_exception_handler(request: Request, exc: OverflowError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "UNPROCESSABLE_ENTITY", "message": "Integer value too large."}},
+    )
+
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     import structlog, uuid
     log = structlog.get_logger()

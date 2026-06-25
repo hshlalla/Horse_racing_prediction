@@ -1,6 +1,7 @@
 package com.example.horserace
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebSettings
@@ -11,39 +12,32 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
 
+    private val baseUrl = "http://10.0.2.2:5173"
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Simple splash screen delay simulation (in real app, use installSplashScreen())
+        setTheme(R.style.Theme_AppCompat_Light_NoActionBar)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webView)
         setupWebView()
 
-        // In a real implementation, you would dynamically get the host from BuildConfig
-        webView.loadUrl("http://10.0.2.2:5173") 
+        webView.loadUrl(baseUrl)
+        DeepLinkRouter.handleIntent(intent, webView, baseUrl)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        DeepLinkRouter.handleIntent(intent, webView, baseUrl)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
         webView.webViewClient = WebViewClient()
-        
-        val settings = webView.settings
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        
-        settings.allowFileAccess = false
-        settings.allowFileAccessFromFileURLs = false
-        settings.allowUniversalAccessFromFileURLs = false
-        
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        settings.userAgentString = "HorseRaceAndroid/1.0"
-        
-        // Enable cookies
-        val cookieManager = CookieManager.getInstance()
-        cookieManager.setAcceptCookie(true)
-        cookieManager.setAcceptThirdPartyCookies(webView, true)
-
-        // Add JS Interface for FCM
+        WebViewConfig.setupWebView(webView)
         webView.addJavascriptInterface(JsApi(this, webView), "AndroidApp")
     }
 
