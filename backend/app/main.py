@@ -1,5 +1,9 @@
+import asyncio
+import json
+import os
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Callable
 import structlog
 from fastapi import FastAPI, Request, Response
@@ -13,6 +17,31 @@ from app.core.logging import configure_logging
 from app.db.session import async_session_factory
 
 log = structlog.get_logger()
+
+
+async def _poll_model_reload() -> None:
+    """Background task: every 60 s check production.json and evict stale caches."""
+    from app.ml.predict.service import reload_model
+
+    model_dir = Path(os.environ.get("MODEL_DIR", "models"))
+    prod_json = model_dir / "production.json"
+    last_versions: dict[str, str] = {}
+
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if not prod_json.exists():
+                continue
+            with open(prod_json) as f:
+                data: dict = json.load(f)
+            for track, meta in data.items():
+                version = meta.get("version", "")
+                if last_versions.get(track) != version:
+                    last_versions[track] = version
+                    reload_model(track)
+                    log.info("model_reloaded", track=track, version=version)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("poll_model_reload_error", error=str(exc))
 
 
 async def _readyz_check() -> dict[str, str]:
@@ -37,12 +66,20 @@ async def _readyz_check() -> dict[str, str]:
 async def lifespan(app: FastAPI):
     configure_logging(settings.LOG_LEVEL)
     log.info("startup", environment=settings.ENVIRONMENT)
-    
+
     from app.scheduler.jobs import setup_scheduler, scheduler
     setup_scheduler()
-    
+
+    reload_task = asyncio.create_task(_poll_model_reload())
+
     yield
-    
+
+    reload_task.cancel()
+    try:
+        await reload_task
+    except asyncio.CancelledError:
+        pass
+
     scheduler.shutdown()
     log.info("shutdown")
 

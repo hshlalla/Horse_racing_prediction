@@ -12,9 +12,11 @@ def crawl(args):
 
 def train(args):
     print(f"Starting training for track {args.track}...")
-    from app.ml.train import evaluate
-    evaluate.execute()
-    print("Training complete.")
+    import os
+    from app.ml.train.pipeline import run_train
+    db_url = os.environ["DATABASE_URL"]
+    result = run_train(track=args.track, db_url=db_url)
+    print(f"Training complete: {result}")
 
 def predict(args):
     print(f"Generating predictions for race {args.race_id}...")
