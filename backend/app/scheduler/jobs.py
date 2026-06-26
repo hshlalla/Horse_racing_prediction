@@ -19,7 +19,7 @@ async def crawl_job():
         yesterday = today - datetime.timedelta(days=1)
         result = await run_crawl(
             start_date=yesterday,
-            end_date=today,
+            end_date=today + datetime.timedelta(days=2),
         )
         logger.info("crawl_job done: %s", result)
     except Exception as exc:
