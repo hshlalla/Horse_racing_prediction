@@ -2,7 +2,6 @@ import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db.models.crawl import (
     Horse, Jockey, Trainer, Race, RaceEntry, RaceResult, InraceTiming
