@@ -119,7 +119,7 @@ def load_dataset_pg(db_url: str):
 
     train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
     val_mask = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
-    test_mask = df['race_date'] >= '2026-01-01'
+    test_mask = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
 
     return (
         df[train_mask].copy(),
