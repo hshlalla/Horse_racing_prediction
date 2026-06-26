@@ -2,15 +2,14 @@ import logging
 import os
 import glob
 import datetime
-import requests
+import httpx
 from datetime import date
-from typing import Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.db.session import async_session_factory
-from app.db.models.crawl import CrawlState, CrawlFailure
+from app.db.models.crawl import CrawlState
 from app.ml.crawl.kra_client import KRAClient
 from app.ml.crawl.parsers.kra_live_parser import KRALiveParser
 from app.ml.crawl.upsert import (
@@ -33,14 +32,14 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
     """Fetch one completed race and upsert all rows. Returns True on success."""
     meet = TRACK_MEET_MAP.get(track, "1")
     try:
-        res = requests.post(
-            "https://race.kra.co.kr/raceScore/ScoretableDetailList.do",
-            headers={"User-Agent": "Mozilla/5.0"},
-            data={"meet": meet, "realRcDate": race_date_str, "realRcNo": str(rc_no)},
-            timeout=15,
-        )
-        res.encoding = "euc-kr"
-        detail = KRALiveParser.parse_race_detail(res.text)
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                "https://race.kra.co.kr/raceScore/ScoretableDetailList.do",
+                headers={"User-Agent": "Mozilla/5.0"},
+                data={"meet": meet, "realRcDate": race_date_str, "realRcNo": str(rc_no)},
+                timeout=15.0,
+            )
+        detail = KRALiveParser.parse_race_detail(res.content.decode("euc-kr"))
         if not detail or not detail.get("horses"):
             return False
 
@@ -115,6 +114,7 @@ async def run_crawl(start_date: date, end_date: date,
 
     async with async_session_factory() as session:
         for track, meet in TRACK_MEET_MAP.items():
+            failures_before = len(failures)
             try:
                 list_html = client.fetch_page(
                     "/raceScore/ScoretableScoreList.do",
@@ -153,7 +153,8 @@ async def run_crawl(start_date: date, end_date: date,
                     state = CrawlState(track=track, last_status="ok")
                     session.add(state)
                 state.last_crawled_date = end_date
-                state.last_status = "ok" if not failures else "partial"
+                track_had_failures = len(failures) > failures_before
+                state.last_status = "partial" if track_had_failures else "ok"
                 await session.commit()
 
             except Exception as exc:
