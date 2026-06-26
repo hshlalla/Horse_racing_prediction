@@ -130,6 +130,62 @@ async def test_admin_data_status_crawl_states_includes_all_tracks(admin_client: 
     assert {"SEOUL", "BUSAN", "JEJU"}.issubset(state_tracks)
 
 
+@pytest.mark.asyncio
+async def test_admin_ml_status_missing_production_json(tmp_path):
+    """When production.json does not exist, endpoint returns 200 with all tracks."""
+    # Use a non-existent directory for MODEL_DIR
+    application = create_app()
+    with patch.dict("os.environ", {"MODEL_DIR": str(tmp_path / "nonexistent")}):
+        async with AsyncClient(transport=ASGITransport(app=application), base_url="http://test") as client:
+            resp = await client.get("/api/v1/admin/ml/status")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # Should always return tracks even when production.json doesn't exist
+    assert "tracks" in body
+    assert len(body["tracks"]) == 3  # SEOUL, BUSAN, JEJU
+    assert all(t["model_version"] is None for t in body["tracks"])
+    assert "last_updated" in body
+
+
+@pytest.mark.asyncio
+async def test_admin_data_status_empty_db():
+    """When DB has no crawl data, endpoint returns 200 with empty lists."""
+    mock_session = MagicMock(spec=AsyncSession)
+
+    # Mock execute to return empty results
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.all.return_value = []
+    execute_result.scalar.return_value = 0
+    mock_session.execute = AsyncMock(return_value=execute_result)
+
+    async def override_get_db():
+        yield mock_session
+
+    application = create_app()
+    application.dependency_overrides[deps.get_db] = override_get_db
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=application), base_url="http://test") as client:
+            resp = await client.get("/api/v1/admin/data/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "crawl_states" in data
+        assert "failures" in data
+        assert "db_summary" in data
+        # With empty DB, should still have all 3 tracks in crawl_states
+        assert len(data["crawl_states"]) == 3
+        # failures should be empty
+        assert data["failures"] == []
+        # db_summary counts should be 0
+        assert data["db_summary"]["total_races"] == 0
+        assert data["db_summary"]["total_horses"] == 0
+        assert data["db_summary"]["total_jockeys"] == 0
+    finally:
+        application.dependency_overrides.pop(deps.get_db, None)
+
+
 # ---------------------------------------------------------------------------
 # /api/v1/admin/data/retry
 # ---------------------------------------------------------------------------
