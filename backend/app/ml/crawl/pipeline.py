@@ -20,7 +20,7 @@ from app.ml.crawl.upsert import (
 
 logger = logging.getLogger(__name__)
 
-TRACK_MEET_MAP = {"SEOUL": "1", "BUSAN": "2", "JEJU": "3"}
+TRACK_MEET_MAP = {"SEOUL": "1", "JEJU": "2", "BUSAN": "3"}
 SEX_MAP = {"수": "M", "암": "F", "거": "G"}
 
 
@@ -54,10 +54,11 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
             race_date=race_date,
             race_number=rc_no,
             race_name=f"{rc_no}경주",
-            distance_m=detail.get("distance_m", 1200),
+            distance_m=meta.get("distance_m", 1200),
             surface=detail.get("surface", "DIRT"),
             track_condition=meta.get("track_condition"),
             weather=meta.get("weather"),
+            humidity=meta.get("humidity"),
             field_size=len(detail["horses"]),
         )
 
@@ -66,6 +67,7 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
                 session,
                 name=h["horse_name"],
                 sex=SEX_MAP.get(h.get("sex", "수"), "M"),
+                age=h.get("age", 3),
             )
             jockey_id = await upsert_jockey(session, name=h.get("jockey", "unknown"))
             trainer_id = await upsert_trainer(session, name=h.get("trainer", "unknown"))
@@ -77,6 +79,8 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
                 program_number=h.get("horse_no", 0),
                 jockey_id=jockey_id,
                 trainer_id=trainer_id,
+                carry_weight_kg=h.get("carry_weight"),
+                body_weight_kg=h.get("body_weight"),
                 morning_odds=h.get("odds_win"),
             )
             await upsert_race_result(
@@ -92,6 +96,13 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
                 horse_id=horse_id,
                 s1f_time=h.get("s1f_time"),
                 g3f_time=h.get("g3f_time"),
+                corner1_rank=h.get("corner1_rank"),
+                corner2_rank=h.get("corner2_rank"),
+                corner3_rank=h.get("corner3_rank"),
+                corner4_rank=h.get("corner4_rank"),
+                corner5_rank=h.get("corner5_rank"),
+                corner6_rank=h.get("corner6_rank"),
+                corner7_rank=h.get("corner7_rank"),
             )
 
         await session.commit()
@@ -258,13 +269,22 @@ class CrawlingPipeline:
 
 def execute():
     import asyncio
-
-    # User's provided decoding key
-    api_key = "7d7Y9lSLZvt//+HmnwT8W7vbC5JsoY4ZvQ4WJGfl33ZUC5KJ+/lUhsP9hSulAgPMcvlLocZ1BIzzVaaX9Hqbtg=="
-
+    from datetime import date, timedelta
+    
     async def _execute():
-        async with async_session_factory() as db:
-            pipeline = CrawlingPipeline(db, api_key=api_key)
-            await pipeline.run(date(1990, 1, 1), date.today(), use_synthetic_fallback=True)
+        # Drop and recreate tables to start fresh
+        from app.db.base import Base
+        from app.db.session import engine
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+            
+        # Crawl only the last 30 days to make it fast
+        start_date = date.today() - timedelta(days=30)
+        end_date = date.today()
+        
+        logger.info(f"Crawling REAL KRA DATA from {start_date} to {end_date}...")
+        res = await run_crawl(start_date, end_date, use_synthetic_fallback=False)
+        print("Crawl Result:", res)
 
     asyncio.run(_execute())

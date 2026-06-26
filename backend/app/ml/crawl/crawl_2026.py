@@ -90,7 +90,8 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                 surface="Dirt",
                 field_size=len(details),
                 weather=meta.get("weather", "맑음"),
-                track_condition=meta.get("track_condition", "건조")
+                track_condition=meta.get("track_condition", "건조"),
+                video_url=meta.get("video_url")
             )
             session.add(race)
             await session.flush()
@@ -106,7 +107,7 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                     jockey_id=jockey.id,
                     trainer_id=trainer.id,
                     program_number=d['horse_no'],
-                    carry_weight_kg=d['weight'],
+                    carry_weight_kg=d.get('carry_weight', 53.0),
                     morning_odds=d['odds_win']
                 )
                 session.add(entry)
@@ -130,6 +131,106 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
             await session.commit()
             logger.info(f"Saved {len(details)} results for Race {rc_no} with weather {meta.get('weather')}.")
 
+    except Exception as e:
+        logger.error(f"Failed to crawl {rc_date}: {e}")
+        await session.rollback()
+
+async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
+    # meet: 1=SEOUL, 2=JEJU, 3=BUSAN
+    track_map = {"1": "SEOUL", "2": "JEJU", "3": "BUSAN"}
+    track_name = track_map.get(meet, "SEOUL")
+    
+    logger.info(f"Brute-forcing races for {rc_date} at {track_name}...")
+    try:
+        found_any = False
+        for rc_no in range(1, 16): # typically max 15 races
+            await asyncio.sleep(0.5) # delay to prevent blocking
+            res = requests.post(
+                "https://race.kra.co.kr/raceScore/ScoretableDetailList.do",
+                headers={"User-Agent": "Mozilla/5.0"},
+                data={"meet": meet, "realRcDate": rc_date, "realRcNo": str(rc_no)},
+                timeout=10
+            )
+            res.encoding = 'euc-kr'
+            parsed_data = KRALiveParser.parse_race_detail(res.text)
+            
+            if not parsed_data or not parsed_data.get('horses'):
+                if rc_no > 5 and not found_any:
+                    # If we checked up to race 5 and found nothing, assume no races today
+                    break
+                continue
+                
+            found_any = True
+            meta = parsed_data['meta']
+            details = parsed_data['horses']
+
+            d_obj = datetime.datetime.strptime(rc_date, "%Y%m%d").date()
+            
+            # Delete old race to backfill
+            stmt = select(Race).filter_by(track=track_name, race_date=d_obj, race_number=rc_no)
+            res_db = await session.execute(stmt)
+            old_race = res_db.scalars().first()
+            if old_race:
+                await session.execute(RaceEntry.__table__.delete().where(RaceEntry.race_id == old_race.id))
+                await session.execute(RaceResult.__table__.delete().where(RaceResult.race_id == old_race.id))
+                await session.execute(InraceTiming.__table__.delete().where(InraceTiming.race_id == old_race.id))
+                await session.delete(old_race)
+                await session.flush()
+
+            # Create Race
+            race = Race(
+                track=track_name,
+                race_date=d_obj,
+                race_number=rc_no,
+                race_name=f"Race {rc_no}",
+                distance_m=1000, # default/mock if not parsed
+                surface="Dirt",
+                field_size=len(details),
+                weather=meta.get("weather", "맑음"),
+                track_condition=meta.get("track_condition", "건조"),
+                video_url=meta.get("video_url")
+            )
+            session.add(race)
+            await session.flush()
+
+            for idx, d in enumerate(details):
+                horse = await get_or_create(session, Horse, name=d['horse_name'], sex="M")
+                jockey = await get_or_create(session, Jockey, name=d['jockey'])
+                trainer = await get_or_create(session, Trainer, name=d['trainer'])
+
+                entry = RaceEntry(
+                    race_id=race.id,
+                    horse_id=horse.id,
+                    jockey_id=jockey.id,
+                    trainer_id=trainer.id,
+                    program_number=d['horse_no'],
+                    carry_weight_kg=d.get('carry_weight', 53.0),
+                    morning_odds=d['odds_win']
+                )
+                session.add(entry)
+
+                result = RaceResult(
+                    race_id=race.id,
+                    horse_id=horse.id,
+                    finish_position=d['rank'],
+                    final_odds=d['odds_win']
+                )
+                session.add(result)
+                
+                timing = InraceTiming(
+                    race_id=race.id,
+                    horse_id=horse.id,
+                    s1f_time=d.get('s1f_time', 14.0),
+                    g3f_time=d.get('g3f_time', 38.0)
+                )
+                session.add(timing)
+            
+            await session.commit()
+            logger.info(f"Saved {len(details)} results for {rc_date} Race {rc_no} with weather {meta.get('weather')}.")
+
+        if not found_any:
+            logger.info(f"No races found for {rc_date} at {track_name} (brute-forced 1-15).")
+            
     except Exception as e:
         logger.error(f"Failed to crawl {rc_date}: {e}")
         await session.rollback()

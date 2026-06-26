@@ -132,5 +132,30 @@ def run_experiment():
     for idx, row in imp_df.iterrows():
         print(f"{row['feature']:20s} : {row['importance']:.4f}")
 
+    # -----------------------------------------------------
+    # Ensemble & Promote
+    # -----------------------------------------------------
+    from app.ml.train.models.ensemble import build_ensemble, _race_log_loss
+    from app.ml.train.promote import promote_if_better, compute_kelly_roi
+    
+    print("\n--- Building Ensemble ---")
+    ensemble_model = build_ensemble([model_a, model_b], val_df, features, target)
+    
+    simulate_bets(test_df, ensemble_model, features, "Ensemble Model")
+    
+    val_ll = _race_log_loss(ensemble_model, val_df, features, target)
+    roi = compute_kelly_roi(ensemble_model, val_df, features)
+    
+    print(f"Ensemble Val LogLoss: {val_ll:.4f}")
+    print(f"Ensemble Val ROI: {roi*100:.1f}%")
+    
+    # Promote for BUSAN
+    import os
+    os.makedirs("models", exist_ok=True)
+    promote_if_better("BUSAN", ensemble_model, val_ll, roi, "models/ensemble_busan.pkl")
+    # Also promote for SEOUL and JEJU just in case
+    promote_if_better("SEOUL", ensemble_model, val_ll, roi, "models/ensemble_seoul.pkl")
+    promote_if_better("JEJU", ensemble_model, val_ll, roi, "models/ensemble_jeju.pkl")
+
 if __name__ == "__main__":
     run_experiment()

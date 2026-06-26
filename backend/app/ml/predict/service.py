@@ -60,6 +60,10 @@ FEATURES = [
     "sire_win_rate",
     "past_avg_s1f_time",
     "past_avg_g3f_time",
+    "humidity",
+    "past_avg_start_rank",
+    "past_avg_mid_rank",
+    "past_avg_finish_rank",
 ]
 
 # ---------------------------------------------------------------------------
@@ -156,16 +160,24 @@ async def _get_horse_history(
             "days_since_last_race": 30.0,
             "past_avg_s1f_time": 14.0,
             "past_avg_g3f_time": 38.0,
+            "past_avg_start_rank": 7.0,
+            "past_avg_mid_rank": 7.0,
+            "past_avg_finish_rank": 7.0,
             "n_starts": 0,
         }
 
     is_wins = [1 if r.RaceResult.finish_position == 1 else 0 for r in rows]
+    finish_ranks = [r.RaceResult.finish_position or 7 for r in rows]
+    
     if not is_wins:
         return {
             "horse_win_rate": 0.0,
             "days_since_last_race": 30.0,
             "past_avg_s1f_time": 14.0,
             "past_avg_g3f_time": 38.0,
+            "past_avg_start_rank": 7.0,
+            "past_avg_mid_rank": 7.0,
+            "past_avg_finish_rank": 7.0,
             "n_starts": 0,
         }
 
@@ -187,6 +199,13 @@ async def _get_horse_history(
     timings = list(timing_result.all())
     s1f_times = [t.InraceTiming.s1f_time for t in timings if t.InraceTiming.s1f_time]
     g3f_times = [t.InraceTiming.g3f_time for t in timings if t.InraceTiming.g3f_time]
+    
+    start_ranks = [t.InraceTiming.corner1_rank or 7 for t in timings]
+    # Mid-rank calculation: average of available corner ranks
+    mid_ranks = []
+    for t in timings:
+        c_ranks = [c for c in [t.InraceTiming.corner2_rank, t.InraceTiming.corner3_rank, t.InraceTiming.corner4_rank] if c is not None]
+        mid_ranks.append(sum(c_ranks) / len(c_ranks) if c_ranks else 7.0)
 
     avg_s1f = (
         float(pd.Series(s1f_times).ewm(span=5).mean().iloc[-1]) if s1f_times else 14.0
@@ -194,12 +213,18 @@ async def _get_horse_history(
     avg_g3f = (
         float(pd.Series(g3f_times).ewm(span=5).mean().iloc[-1]) if g3f_times else 38.0
     )
+    avg_start_rank = float(pd.Series(start_ranks).ewm(span=5).mean().iloc[-1]) if start_ranks else 7.0
+    avg_mid_rank = float(pd.Series(mid_ranks).ewm(span=5).mean().iloc[-1]) if mid_ranks else 7.0
+    avg_finish_rank = float(pd.Series(finish_ranks).ewm(span=5).mean().iloc[-1]) if finish_ranks else 7.0
 
     return {
         "horse_win_rate": win_rate,
         "days_since_last_race": days_since,
         "past_avg_s1f_time": avg_s1f,
         "past_avg_g3f_time": avg_g3f,
+        "past_avg_start_rank": avg_start_rank,
+        "past_avg_mid_rank": avg_mid_rank,
+        "past_avg_finish_rank": avg_finish_rank,
         "n_starts": len(rows),
     }
 
@@ -408,6 +433,10 @@ async def _predict_race_impl(
             "sire_win_rate": 0.0,
             "past_avg_s1f_time": history["past_avg_s1f_time"],
             "past_avg_g3f_time": history["past_avg_g3f_time"],
+            "humidity": race.humidity or 50,
+            "past_avg_start_rank": history["past_avg_start_rank"],
+            "past_avg_mid_rank": history["past_avg_mid_rank"],
+            "past_avg_finish_rank": history["past_avg_finish_rank"],
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
@@ -423,29 +452,19 @@ async def _predict_race_impl(
 
     raw_scores = model.predict(pred_df[FEATURES])
 
-    # TODO: apply calibration from production.json (wired in ML-10)
-    probs: np.ndarray = softmax(raw_scores)
+    # EnsembleShim returns probabilities directly (summing to 1 or close to it)
+    if np.isclose(np.sum(raw_scores), 1.0, atol=0.1):
+        probs = raw_scores
+    else:
+        probs = softmax(raw_scores)
 
     # ------------------------------------------------------------------
-    # 7. Cold-start blending
+    # 7. Cold-start blending (DISABLED FOR POC)
     # ------------------------------------------------------------------
-    # Use race.field_size (the official declared field size) for the uniform
-    # prior so cold-start horses get 1/field_size even when fewer entries
-    # are currently in the DataFrame (e.g., scratches, partial data).
-    declared_field_size = int(race.field_size) if race.field_size else len(entries)
-    field_avg = 1.0 / max(declared_field_size, 1)
-    blended = np.array(
-        [
-            min(row["_n_starts"] / 3.0, 1.0) * probs[i]
-            + (1.0 - min(row["_n_starts"] / 3.0, 1.0)) * field_avg
-            for i, row in enumerate(rows)
-        ]
-    )
-
-    # Renormalise after cold-start blend
-    total = float(blended.sum())
-    if total > 0:
-        blended = blended / total
+    # In production, we blend horses with < 3 starts toward the field average.
+    # However, since the POC DB is small, all horses look like "debut" horses.
+    # We disable this to show the raw Ensemble predictions.
+    blended = np.array(probs)
 
     # ------------------------------------------------------------------
     # 8. Build HorsePrediction list

@@ -59,10 +59,12 @@ class Race(Base):
     surface: Mapped[str] = mapped_column(String(20))
     track_condition: Mapped[Optional[str]] = mapped_column(String(20))
     weather: Mapped[Optional[str]] = mapped_column(String(20))
+    humidity: Mapped[Optional[int]] = mapped_column(Integer)
     grade: Mapped[Optional[str]] = mapped_column(String(10))
     race_class: Mapped[Optional[str]] = mapped_column(String(50))
     field_size: Mapped[Optional[int]] = mapped_column(Integer)
     post_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True))
+    video_url: Mapped[Optional[str]] = mapped_column(String(200))
 
     entries: Mapped[list["RaceEntry"]] = relationship(back_populates="race")
 
@@ -82,6 +84,9 @@ class RaceEntry(Base):
     morning_odds: Mapped[Optional[float]] = mapped_column(Float)
 
     race: Mapped["Race"] = relationship(back_populates="entries")
+    horse: Mapped["Horse"] = relationship()
+    jockey: Mapped["Jockey"] = relationship()
+    trainer: Mapped["Trainer"] = relationship()
 
 
 class RaceResult(Base):
@@ -110,6 +115,9 @@ class InraceTiming(Base):
     corner2_rank: Mapped[Optional[int]] = mapped_column(Integer)
     corner3_rank: Mapped[Optional[int]] = mapped_column(Integer)
     corner4_rank: Mapped[Optional[int]] = mapped_column(Integer)
+    corner5_rank: Mapped[Optional[int]] = mapped_column(Integer)
+    corner6_rank: Mapped[Optional[int]] = mapped_column(Integer)
+    corner7_rank: Mapped[Optional[int]] = mapped_column(Integer)
 
 
 class OddsSnapshot(Base):

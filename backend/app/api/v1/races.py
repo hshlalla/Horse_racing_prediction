@@ -37,6 +37,7 @@ class RaceEntryResponse(BaseModel):
 class RaceDetailResponse(RaceListResponseItem):
     track_condition: Optional[str]
     weather: Optional[str]
+    video_url: Optional[str]
     entries: List[RaceEntryResponse]
 
 @router.get("", response_model=RaceListResponse)
@@ -79,5 +80,6 @@ async def get_race(race_id: int, db: AsyncSession = Depends(get_db)):
         race_name=race.race_name, distance_m=race.distance_m, surface=race.surface,
         post_time=race.post_time, field_size=race.field_size,
         track_condition=race.track_condition, weather=race.weather,
+        video_url=race.video_url,
         entries=entries
     )

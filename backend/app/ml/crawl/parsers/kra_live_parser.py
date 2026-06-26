@@ -11,6 +11,19 @@ class KRALiveParser:
     """
     
     @staticmethod
+    def parse_time_str(time_str: str) -> float:
+        """Parses a time string like '1:20.3' or '0:14.0' into float seconds."""
+        if not time_str or not ':' in time_str:
+            return 0.0
+        try:
+            parts = time_str.split(':')
+            m = int(parts[0])
+            s = float(parts[1])
+            return m * 60 + s
+        except:
+            return 0.0
+    
+    @staticmethod
     def parse_chulma_list(html_content: str) -> List[Dict[str, Any]]:
         """
         Parses ChulmaDetailInfoList.do to extract upcoming race schedules.
@@ -74,7 +87,7 @@ class KRALiveParser:
         results = []
         meta = {"weather": "맑음", "track_condition": "건조"}
         
-        # 1. Parse meta (weather, track condition) from the first tableType1
+        # 1. Parse meta (weather, track condition, distance) from the first tableType1
         info_table = soup.find('div', class_='tableType1')
         if info_table:
             tr = info_table.find('tr', class_='alignC')
@@ -83,7 +96,23 @@ class KRALiveParser:
                 if len(tds) >= 4:
                     meta["weather"] = tds[-4].get_text(strip=True)
                     meta["track_condition"] = tds[-3].get_text(strip=True)
+                    humidity_txt = tds[-2].get_text(strip=True).replace('%', '')
+                    if humidity_txt.isdigit():
+                        meta["humidity"] = int(humidity_txt)
+            
+            for td in info_table.find_all('td'):
+                txt = td.get_text(strip=True)
+                if txt.endswith('M') and txt[:-1].isdigit():
+                    meta["distance_m"] = int(txt[:-1])
+                    break
                     
+        # 1.5 Parse YouTube video URL
+        import re
+        youtube_match = re.search(r"youtube\.com/watch\?v=([^'\"]+)", html_content)
+        if youtube_match:
+            video_id = youtube_match.group(1)
+            meta["video_url"] = f"https://www.youtube.com/watch?v={video_id}"
+            
         # 2. Parse Sectional Times (S1F, G3F) from the second tableType2 (통과누적기록)
         horse_times = {}
         tables2 = soup.find_all('div', class_='tableType2')
@@ -94,19 +123,33 @@ class KRALiveParser:
                     cols = row.find_all('td')
                     if len(cols) >= 9:
                         try:
-                            h_no = int(cols[0].get_text(strip=True))
-                            s1f_str = cols[2].get_text(strip=True)
-                            g3f_str = cols[6].get_text(strip=True) # 6-4F -> wait, actually G3F is the last 600m. 
-                            # KRA provides S-1F, 10-8, 8-6, 6-4, 4-2, 2-G, 1-G. We will just use the available columns safely.
-                            # S-1F is usually index 2. G-3F is often index 6 or 7 depending on distance.
-                            # Let's just grab S1F safely. If G3F is hard to pinpoint, we'll grab the second to last as G3F.
-                            
-                            s1f = float(s1f_str) if s1f_str.replace('.', '', 1).isdigit() else 14.0
-                            # Just grab a proxy for G3F from the second to last column
-                            g3f_str_safe = cols[-2].get_text(strip=True)
-                            g3f = float(g3f_str_safe) if g3f_str_safe.replace('.', '', 1).isdigit() else 38.0
-                            
-                            horse_times[h_no] = {"s1f": s1f, "g3f": g3f}
+                            h_no = int(cols[1].get_text(strip=True))
+                            horse_no_str = cols[1].get_text(strip=True)
+                            if horse_no_str.isdigit():
+                                horse_no = int(horse_no_str)
+                                s1f_time = KRALiveParser.parse_time_str(cols[3].get_text(strip=True))
+                                g3f_time = KRALiveParser.parse_time_str(cols[-3].get_text(strip=True)) if len(cols) >= 3 else 38.0
+                                if g3f_time == 0.0: g3f_time = 38.0
+                                if s1f_time == 0.0: s1f_time = 14.0
+                                
+                                # Extract corner ranks using regex
+                                import re
+                                ranks_list = [int(r) for r in re.findall(r'\d+', cols[2].get_text())]
+                                
+                                corner1 = corner2 = corner3 = corner4 = corner5 = corner6 = corner7 = None
+                                if len(ranks_list) > 0: corner1 = ranks_list[0]
+                                if len(ranks_list) > 1: corner2 = ranks_list[1]
+                                if len(ranks_list) > 2: corner3 = ranks_list[2]
+                                if len(ranks_list) > 3: corner4 = ranks_list[3]
+                                if len(ranks_list) > 4: corner5 = ranks_list[4]
+                                if len(ranks_list) > 5: corner6 = ranks_list[5]
+                                if len(ranks_list) > 6: corner7 = ranks_list[6]
+                                    
+                                horse_times[horse_no] = {
+                                    "s1f": s1f_time, "g3f": g3f_time,
+                                    "c1": corner1, "c2": corner2, "c3": corner3, "c4": corner4,
+                                    "c5": corner5, "c6": corner6, "c7": corner7
+                                }
                         except:
                             pass
         
@@ -134,30 +177,56 @@ class KRALiveParser:
                     rank = int(rank_str)
                     horse_no = int(cols[1].get_text(strip=True))
                     horse_name = cols[2].get_text(strip=True)
+                    sex = cols[4].get_text(strip=True)
+                    
+                    age_str = cols[5].get_text(strip=True).replace('세', '')
+                    age = int(age_str) if age_str.isdigit() else 3
+                    
                     jockey = cols[8].get_text(strip=True)
                     trainer = cols[9].get_text(strip=True)
                     
-                    weight_str = cols[12].get_text(strip=True)
-                    weight = 0
-                    if '(' in weight_str:
-                        weight = float(weight_str.split('(')[0].strip())
+                    carry_weight_str = cols[6].get_text(strip=True)
+                    carry_weight = 0.0
+                    if carry_weight_str:
+                        # Sometimes it has a * like '*52.5'
+                        cw_clean = carry_weight_str.replace('*', '')
+                        carry_weight = float(cw_clean) if cw_clean.replace('.', '', 1).isdigit() else 0.0
+                        
+                    body_weight_str = cols[12].get_text(strip=True)
+                    body_weight = 0.0
+                    if '(' in body_weight_str:
+                        body_weight = float(body_weight_str.split('(')[0].strip())
                         
                     odds_win = cols[13].get_text(strip=True)
                     odds_place = cols[14].get_text(strip=True)
                     
-                    times = horse_times.get(horse_no, {"s1f": 14.0, "g3f": 38.0})
+                    times = horse_times.get(horse_no, {
+                        "s1f": 14.0, "g3f": 38.0,
+                        "c1": None, "c2": None, "c3": None, "c4": None,
+                        "c5": None, "c6": None, "c7": None
+                    })
                     
                     results.append({
                         "rank": rank,
                         "horse_no": horse_no,
                         "horse_name": horse_name,
+                        "sex": sex,
+                        "age": age,
                         "jockey": jockey,
                         "trainer": trainer,
-                        "weight": weight,
+                        "carry_weight": carry_weight,
+                        "body_weight": body_weight,
                         "odds_win": float(odds_win) if odds_win.replace('.','',1).isdigit() else 1.0,
                         "odds_place": float(odds_place) if odds_place.replace('.','',1).isdigit() else 1.0,
                         "s1f_time": times["s1f"],
-                        "g3f_time": times["g3f"]
+                        "g3f_time": times["g3f"],
+                        "corner1_rank": times.get("c1"),
+                        "corner2_rank": times.get("c2"),
+                        "corner3_rank": times.get("c3"),
+                        "corner4_rank": times.get("c4"),
+                        "corner5_rank": times.get("c5"),
+                        "corner6_rank": times.get("c6"),
+                        "corner7_rank": times.get("c7")
                     })
                 except Exception as e:
                     logger.debug(f"Failed to parse row: {e}")

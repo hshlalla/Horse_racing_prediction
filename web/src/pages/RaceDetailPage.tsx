@@ -53,6 +53,12 @@ export default function RaceDetailPage() {
 
   const predMap = new Map(predictions?.items?.map((p: any) => [p.horse_id, p]));
 
+  const sortedEntries = [...race.entries].sort((a: any, b: any) => {
+    const probA = predMap.get(a.horse_id)?.win_probability || 0;
+    const probB = predMap.get(b.horse_id)?.win_probability || 0;
+    return probB - probA;
+  });
+
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-950 text-slate-200 pb-10">
       <header className="p-4 border-b border-white/10 sticky top-0 bg-slate-950/80 backdrop-blur-md z-20 shadow-lg shadow-black/20">
@@ -72,17 +78,34 @@ export default function RaceDetailPage() {
             {race.distance_m}m
           </div>
         </div>
-        <div className="flex gap-2 text-xs font-medium text-slate-400">
-          <span className="bg-slate-900 px-2 py-1 rounded border border-white/5">🛣️ {race.surface}</span>
+        <div className="flex gap-2 text-xs font-medium text-slate-400 mt-2">
           <span className="bg-slate-900 px-2 py-1 rounded border border-white/5">🌤️ {race.track_condition || "Unknown"}</span>
+          {race.humidity && (
+            <span className="bg-slate-900 px-2 py-1 rounded border border-white/5">💧 습도 {race.humidity}%</span>
+          )}
+          <span className="bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-1 rounded-full flex items-center gap-1 shadow-[0_0_10px_rgba(99,102,241,0.2)]">
+            ✨ Ensemble AI
+          </span>
         </div>
       </header>
       
+      {race.video_url && (
+        <div className="px-4 py-4 border-b border-white/5 bg-slate-900/30">
+          <a href={race.video_url} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 bg-red-600/20 text-red-400 border border-red-500/30 px-4 py-3 rounded-xl font-bold hover:bg-red-600/30 transition-colors shadow-lg shadow-red-900/20">
+            <span className="text-xl">▶</span> YouTube 경주 영상 시청
+          </a>
+        </div>
+      )}
+
       <div className="p-4 space-y-4">
-        {race.entries?.sort((a: any, b: any) => a.program_number - b.program_number).map((entry: any) => {
+        {race.entries?.sort((a: any, b: any) => {
+          const probA = predMap.get(a.horse_id)?.win_probability || 0;
+          const probB = predMap.get(b.horse_id)?.win_probability || 0;
+          return probB - probA; // Descending order
+        }).map((entry: any, index: number) => {
           const pred = predMap.get(entry.horse_id) as any;
           const isFav = favSet.has(entry.horse_id);
-          const isTopPick = pred && pred.win_probability > 0.2; // highlight if high prob
+          const isTopPick = index === 0; // The 1st pick by AI
           
           return (
             <div 
@@ -129,6 +152,54 @@ export default function RaceDetailPage() {
                     </div>
                     <ProbabilityBar probability={pred.place_probability} color="from-teal-400 to-emerald-500" />
                   </div>
+                  {pred.features_snapshot && (
+                    <div className="mt-3 flex flex-col gap-2">
+                      {pred.features_snapshot.past_avg_start_rank && pred.features_snapshot.past_avg_mid_rank && (
+                        (() => {
+                          const s = pred.features_snapshot.past_avg_start_rank;
+                          const m = pred.features_snapshot.past_avg_mid_rank;
+                          let style = { label: "추입 (Closer)", icon: "🚀", color: "text-purple-400 border-purple-400/30 bg-purple-400/10" };
+                          if (s <= 3.5 && m <= 3.5) style = { label: "선행 (Front)", icon: "🏃‍♂️💨", color: "text-red-400 border-red-400/30 bg-red-400/10" };
+                          else if (s > 3.5 && m <= 5.0) style = { label: "선입 (Stalker)", icon: "🐎", color: "text-blue-400 border-blue-400/30 bg-blue-400/10" };
+                          
+                          return (
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${style.color}`}>
+                                {style.icon} {style.label}
+                              </span>
+                            </div>
+                          );
+                        })()
+                      )}
+                      <div className="flex flex-wrap gap-2 text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                        {pred.features_snapshot.horse_win_rate !== undefined && (
+                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
+                            🐎 승률: {(pred.features_snapshot.horse_win_rate * 100).toFixed(1)}%
+                          </span>
+                        )}
+                        {pred.features_snapshot.past_avg_g3f_time !== undefined && (
+                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
+                            ⚡ G3F: {pred.features_snapshot.past_avg_g3f_time.toFixed(1)}s
+                          </span>
+                        )}
+                        {pred.features_snapshot.past_avg_start_rank !== undefined && (
+                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
+                            🏁 S-R: {pred.features_snapshot.past_avg_start_rank.toFixed(1)}
+                          </span>
+                        )}
+                        {pred.features_snapshot.past_avg_mid_rank !== undefined && (
+                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
+                            🔄 M-R: {pred.features_snapshot.past_avg_mid_rank.toFixed(1)}
+                          </span>
+                        )}
+                        {pred.features_snapshot.past_avg_finish_rank !== undefined && (
+                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
+                            🏆 F-R: {pred.features_snapshot.past_avg_finish_rank.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

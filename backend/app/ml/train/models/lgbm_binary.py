@@ -1,6 +1,12 @@
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+class ModelShim:
+    def __init__(self, m):
+        self.m = m
+    def predict(self, X):
+        return self.m.predict(X)
+
 def train_lgbm(train_df: pd.DataFrame, val_df: pd.DataFrame, features: list, target: str):
     print("Training Gradient Boosting Pointwise Ranker Model (Fallback for LightGBM/XGBoost)...")
     
@@ -32,11 +38,4 @@ def train_lgbm(train_df: pd.DataFrame, val_df: pd.DataFrame, features: list, tar
     )
     
     model.fit(X_train, y_train)
-    
-    class ModelShim:
-        def __init__(self, m):
-            self.m = m
-        def predict(self, X):
-            return self.m.predict(X)
-            
     return ModelShim(model)

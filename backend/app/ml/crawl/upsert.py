@@ -53,6 +53,7 @@ async def upsert_trainer(session: AsyncSession, name: str,
 async def upsert_race(session: AsyncSession, track: str, race_date: datetime.date,
                       race_number: int, race_name: str, distance_m: int, surface: str,
                       track_condition: Optional[str] = None, weather: Optional[str] = None,
+                      humidity: Optional[int] = None,
                       grade: Optional[str] = None, field_size: Optional[int] = None,
                       post_time: Optional[datetime.datetime] = None) -> int:
     """Upsert race by (track, race_date, race_number). Returns race.id."""
@@ -69,6 +70,7 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
             track=track, race_date=race_date, race_number=race_number,
             race_name=race_name, distance_m=distance_m, surface=surface,
             track_condition=track_condition, weather=weather,
+            humidity=humidity,
             grade=grade, field_size=field_size, post_time=post_time,
         )
         session.add(race)
@@ -78,6 +80,7 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
         race.race_name = race_name
         race.track_condition = track_condition
         race.weather = weather
+        race.humidity = humidity
         race.field_size = field_size
         race.post_time = post_time
     return race.id
@@ -141,7 +144,14 @@ async def upsert_race_result(session: AsyncSession, race_id: int, horse_id: int,
 
 async def upsert_inrace_timing(session: AsyncSession, race_id: int, horse_id: int,
                                s1f_time: Optional[float] = None,
-                               g3f_time: Optional[float] = None) -> None:
+                               g3f_time: Optional[float] = None,
+                               corner1_rank: Optional[int] = None,
+                               corner2_rank: Optional[int] = None,
+                               corner3_rank: Optional[int] = None,
+                               corner4_rank: Optional[int] = None,
+                               corner5_rank: Optional[int] = None,
+                               corner6_rank: Optional[int] = None,
+                               corner7_rank: Optional[int] = None) -> None:
     """Upsert inrace timing by (race_id, horse_id)."""
     result = await session.execute(
         select(InraceTiming).where(
@@ -154,8 +164,19 @@ async def upsert_inrace_timing(session: AsyncSession, race_id: int, horse_id: in
         row = InraceTiming(
             race_id=race_id, horse_id=horse_id,
             s1f_time=s1f_time, g3f_time=g3f_time,
+            corner1_rank=corner1_rank, corner2_rank=corner2_rank,
+            corner3_rank=corner3_rank, corner4_rank=corner4_rank,
+            corner5_rank=corner5_rank, corner6_rank=corner6_rank,
+            corner7_rank=corner7_rank
         )
         session.add(row)
     else:
         row.s1f_time = s1f_time
         row.g3f_time = g3f_time
+        row.corner1_rank = corner1_rank
+        row.corner2_rank = corner2_rank
+        row.corner3_rank = corner3_rank
+        row.corner4_rank = corner4_rank
+        row.corner5_rank = corner5_rank
+        row.corner6_rank = corner6_rank
+        row.corner7_rank = corner7_rank
