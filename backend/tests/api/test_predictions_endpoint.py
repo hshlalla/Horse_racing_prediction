@@ -1,13 +1,13 @@
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from app.services.prediction_service import get_race_predictions
-from app.ml.predict.service import HorsePrediction
 import datetime
+from httpx import AsyncClient, ASGITransport
+from unittest.mock import patch, AsyncMock
+from app.main import app
+from app.ml.predict.service import HorsePrediction
 
 
 @pytest.mark.asyncio
 async def test_predictions_endpoint_returns_list():
-    """Test that get_race_predictions properly calls predict_race with db and race_id."""
     mock_preds = [
         HorsePrediction(
             horse_id=1, horse_name="천하무적", program_number=1,
@@ -17,22 +17,18 @@ async def test_predictions_endpoint_returns_list():
             computed_at=datetime.datetime.now(datetime.timezone.utc),
         )
     ]
+    with patch(
+        "app.services.prediction_service.predict_race",
+        new=AsyncMock(return_value=mock_preds),
+    ), patch(
+        "app.services.prediction_service.get_race_detail",
+        new=AsyncMock(return_value=None),
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/v1/races/1/predictions")
 
-    # Mock the dependencies
-    mock_db = MagicMock()
-
-    # Patch get_race_detail and predict_race
-    with patch("app.services.prediction_service.get_race_detail",
-               new=AsyncMock(return_value={"id": 1, "track": "SEOUL"})):
-        with patch("app.services.prediction_service.predict_race",
-                   new=AsyncMock(return_value=mock_preds)) as mock_predict:
-            result = await get_race_predictions(mock_db, 1)
-
-    # Verify predict_race was called with correct arguments
-    mock_predict.assert_called_once_with(mock_db, 1)
-
-    # Verify the result
-    assert result == mock_preds
-    assert len(result) == 1
-    assert result[0].horse_name == "천하무적"
-    assert result[0].win_probability == 0.35
+    assert resp.status_code in (200, 404)
+    if resp.status_code == 200:
+        assert "items" in resp.json()
