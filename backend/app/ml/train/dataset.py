@@ -153,7 +153,14 @@ def load_dataset_pg(db_url: str):
     """
     from sqlalchemy import create_engine, text
 
-    engine = create_engine(db_url)
+    # Derive a synchronous URL: replace async driver specifier so that the
+    # standard sync create_engine can connect (async driver can't be used here).
+    sync_url = (
+        db_url
+        .replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        .replace("postgresql://", "postgresql+psycopg2://")
+    )
+    engine = create_engine(sync_url)
     with engine.connect() as conn:
         df = pd.read_sql(text(_QUERY), conn, parse_dates=['race_date'])
     engine.dispose()

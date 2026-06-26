@@ -311,6 +311,11 @@ async def _upsert_predictions(
                 )
             )
     await session.flush()
+    try:
+        await session.commit()
+    except Exception as exc:
+        logger.warning("Failed to commit predictions for race_id=%s: %s", race_id, exc)
+        await session.rollback()
 
 
 # ---------------------------------------------------------------------------
