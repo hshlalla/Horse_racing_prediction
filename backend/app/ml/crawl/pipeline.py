@@ -3,6 +3,7 @@ import os
 import glob
 import datetime
 import httpx
+import requests
 from datetime import date
 
 from sqlalchemy.orm import Session
