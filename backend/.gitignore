@@ -8,3 +8,16 @@ catboost_info/
 roi_cache.json
 dump.sql
 *.html
+
+# Model binaries
+models/
+app/ml/models/*.cbm
+app/ml/models/*.pkl
+
+# Lock files
+uv.lock
+
+# Test/debug artifacts
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
