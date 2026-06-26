@@ -123,9 +123,14 @@ def create_app() -> FastAPI:
     async def readyz() -> dict:
         return await _readyz_check()
 
-    # API routers (added in later tasks)
-    from app.api.v1 import router as v1_router
-    app.include_router(v1_router, prefix="/api/v1")
+    # API routers
+    from app.api.routers import analysis, crawl, model, predict, races, reports
+    app.include_router(crawl.router, prefix="/api/crawl", tags=["Crawl"])
+    app.include_router(races.router, prefix="/api/races", tags=["Races"])
+    app.include_router(predict.router, prefix="/api/predict", tags=["Predict"])
+    app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
+    app.include_router(model.router, prefix="/api/model", tags=["Model"])
+    app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 
     # Static web app — served last so API routes take priority
     import pathlib

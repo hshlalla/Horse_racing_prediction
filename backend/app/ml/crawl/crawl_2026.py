@@ -81,6 +81,15 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
             details = parsed_data['horses']
 
             # Create Race
+            pt_str = meta.get("post_time_str")
+            post_time_dt = None
+            if pt_str:
+                try:
+                    pt_time = datetime.datetime.strptime(pt_str, "%H:%M").time()
+                    post_time_dt = datetime.datetime.combine(d_obj, pt_time)
+                except Exception:
+                    pass
+
             race = Race(
                 track=track_name,
                 race_date=d_obj,
@@ -91,7 +100,9 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                 field_size=len(details),
                 weather=meta.get("weather", "맑음"),
                 track_condition=meta.get("track_condition", "건조"),
-                video_url=meta.get("video_url")
+                video_url=meta.get("video_url"),
+                payouts=parsed_data.get("payouts"),
+                post_time=post_time_dt
             )
             session.add(race)
             await session.flush()
@@ -177,6 +188,15 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                 await session.delete(old_race)
                 await session.flush()
 
+            pt_str = meta.get("post_time_str")
+            post_time_dt = None
+            if pt_str:
+                try:
+                    pt_time = datetime.datetime.strptime(pt_str, "%H:%M").time()
+                    post_time_dt = datetime.datetime.combine(d_obj, pt_time)
+                except Exception:
+                    pass
+
             # Create Race
             race = Race(
                 track=track_name,
@@ -188,7 +208,9 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                 field_size=len(details),
                 weather=meta.get("weather", "맑음"),
                 track_condition=meta.get("track_condition", "건조"),
-                video_url=meta.get("video_url")
+                video_url=meta.get("video_url"),
+                payouts=parsed_data.get("payouts"),
+                post_time=post_time_dt
             )
             session.add(race)
             await session.flush()

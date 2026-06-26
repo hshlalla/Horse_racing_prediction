@@ -87,13 +87,13 @@ export default function FavoritesPage() {
   if (isLoading) return <div className="p-4">Loading favorites...</div>;
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-gray-50">
+    <div className="max-w-7xl mx-auto min-h-screen bg-gray-50">
       <header className="p-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
         <h1 className="text-xl font-bold text-slate-900">{t("app.favorites")}</h1>
         <button onClick={() => navigate("/")} className="text-blue-600 text-sm font-medium">Home</button>
       </header>
       
-      <div className="p-4 space-y-3">
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {!favorites?.items || favorites.items.length === 0 ? (
           <div className="text-center text-gray-500 mt-10 p-6 bg-white rounded-xl border border-dashed">
             You have no favorite horses yet.

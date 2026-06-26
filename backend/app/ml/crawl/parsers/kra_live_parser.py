@@ -99,6 +99,9 @@ class KRALiveParser:
                     humidity_txt = tds[-2].get_text(strip=True).replace('%', '')
                     if humidity_txt.isdigit():
                         meta["humidity"] = int(humidity_txt)
+                    time_txt = tds[-1].get_text(strip=True)
+                    if ':' in time_txt:
+                        meta["post_time_str"] = time_txt
             
             for td in info_table.find_all('td'):
                 txt = td.get_text(strip=True)
@@ -231,8 +234,37 @@ class KRALiveParser:
                 except Exception as e:
                     logger.debug(f"Failed to parse row: {e}")
                     continue
+        
+        # 4. Parse Payouts (배당률)
+        payouts = {}
+        for td in soup.find_all('td', class_='textLeft'):
+            raw = td.get_text()
+            if ':' in raw:
+                try:
+                    bet_type, odds_str = raw.split(':', 1)
+                    bet_type = bet_type.strip()
                     
-        return {"meta": meta, "horses": results}
+                    import re
+                    matches = re.findall(r'([①-⑳]+)\s*([\d\.]+)', odds_str)
+                    parsed = []
+                    for chars, odds in matches:
+                        nums = [str(ord(c) - 9311) for c in chars if 9312 <= ord(c) <= 9331]
+                        if nums:
+                            parsed.append({"numbers": "-".join(nums), "odds": float(odds)})
+                    
+                    if parsed:
+                        # Normalize key name
+                        key_map = {
+                            "단승식": "win", "연승식": "place", "복승식": "quinella",
+                            "쌍승식": "exacta", "복연승식": "quinella_place",
+                            "삼복승식": "trio", "삼쌍승식": "trifecta"
+                        }
+                        eng_key = key_map.get(bet_type, bet_type)
+                        payouts[eng_key] = parsed
+                except Exception as e:
+                    logger.debug(f"Failed to parse payout {raw}: {e}")
+
+        return {"meta": meta, "horses": results, "payouts": payouts}
 
     @staticmethod
     def parse_upcoming_race(html_content: str) -> List[Dict[str, Any]]:

@@ -2,7 +2,7 @@ import datetime
 from typing import Optional
 from sqlalchemy import (
     Integer, Date, DateTime, Float, ForeignKey,
-    String, Text, UniqueConstraint, func, text,
+    String, Text, UniqueConstraint, func, text, JSON
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
@@ -65,6 +65,7 @@ class Race(Base):
     field_size: Mapped[Optional[int]] = mapped_column(Integer)
     post_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(timezone=True))
     video_url: Mapped[Optional[str]] = mapped_column(String(200))
+    payouts: Mapped[Optional[dict]] = mapped_column(JSON)
 
     entries: Mapped[list["RaceEntry"]] = relationship(back_populates="race")
 

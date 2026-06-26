@@ -60,7 +60,7 @@ export default function RaceDetailPage() {
   });
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-950 text-slate-200 pb-10">
+    <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-10">
       <header className="p-4 border-b border-white/10 sticky top-0 bg-slate-950/80 backdrop-blur-md z-20 shadow-lg shadow-black/20">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
@@ -97,7 +97,7 @@ export default function RaceDetailPage() {
         </div>
       )}
 
-      <div className="p-4 space-y-4">
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {race.entries?.sort((a: any, b: any) => {
           const probA = predMap.get(a.horse_id)?.win_probability || 0;
           const probB = predMap.get(b.horse_id)?.win_probability || 0;

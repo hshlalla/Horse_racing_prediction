@@ -17,7 +17,7 @@ export default function HorsePage() {
   const { t } = useTranslation();
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-gray-50">
+    <div className="max-w-7xl mx-auto min-h-screen bg-gray-50">
       <header className="bg-slate-900 text-white p-4 sticky top-0 z-10 shadow-md">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate(-1)}><ArrowLeft size={20}/></button>
