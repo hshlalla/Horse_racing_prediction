@@ -1,3 +1,11 @@
 example.com {
+    @admin {
+        path /admin/*
+        path /api/v1/admin/*
+    }
+    basicauth @admin {
+        {$ADMIN_USER} {$ADMIN_PASS_HASH}
+    }
+
     reverse_proxy backend:8000
 }

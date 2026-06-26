@@ -1,5 +1,20 @@
 version: '3.8'
 services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS_HASH=${ADMIN_PASS_HASH}
+    depends_on:
+      - backend
+
   backend:
     build:
       context: ..
@@ -20,3 +35,7 @@ services:
       - POSTGRES_DB=db
   redis:
     image: redis:7
+
+volumes:
+  caddy_data:
+  caddy_config:
