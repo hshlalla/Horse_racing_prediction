@@ -9,5 +9,5 @@ async def get_race_predictions(db: AsyncSession, race_id: int) -> List[HorsePred
         return []
     
     # In a real app, this would read from the DB or trigger the ML pipeline if not cached
-    # For now, we call the stub implementation directly
-    return await predict_race(race_id, race.entries)
+    # Now calls real ML inference pipeline
+    return await predict_race(db, race_id)
