@@ -7,6 +7,7 @@ from app.api.v1.notifications import router as notifications_router
 from app.api.v1.meta import router as meta_router
 from app.api.v1.ml import router as ml_router
 from app.api.v1.horses import router as horses_router
+from app.api.v1.admin import router as admin_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -17,4 +18,5 @@ router.include_router(notifications_router)
 router.include_router(meta_router)
 router.include_router(ml_router)
 router.include_router(horses_router)
+router.include_router(admin_router)
 
