@@ -16,7 +16,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -221,6 +220,14 @@ async def _load_stale_predictions(
     if not cached_rows:
         return []
 
+    # Mark each cached row as stale in the DB before returning
+    try:
+        for row in cached_rows:
+            row.is_stale = True
+        await session.commit()
+    except Exception as exc:
+        logger.warning("Failed to mark predictions stale for race_id=%s: %s", race_id, exc)
+
     # Fetch horse names for the stale predictions
     horse_ids = [r.horse_id for r in cached_rows]
     horse_result = await session.execute(
@@ -287,7 +294,7 @@ async def _upsert_predictions(
 
 
 async def predict_race(
-    race_id: int, session: AsyncSession
+    db: AsyncSession, race_id: int
 ) -> list[HorsePrediction]:
     """
     Predict win probabilities for all horses in a race.
@@ -296,14 +303,14 @@ async def predict_race(
     Falls back to stale cached predictions (or []) if the model is unavailable.
     """
     try:
-        return await _predict_race_impl(race_id, session)
+        return await _predict_race_impl(race_id, db)
     except Exception as exc:
         logger.warning(
             "predict_race failed for race_id=%s: %s — trying stale cache",
             race_id,
             exc,
         )
-        stale = await _load_stale_predictions(session, race_id)
+        stale = await _load_stale_predictions(db, race_id)
         return stale
 
 
@@ -434,6 +441,11 @@ async def _predict_race_impl(
             for i, row in enumerate(rows)
         ]
     )
+
+    # Renormalise after cold-start blend
+    total = float(blended.sum())
+    if total > 0:
+        blended = blended / total
 
     # ------------------------------------------------------------------
     # 8. Build HorsePrediction list

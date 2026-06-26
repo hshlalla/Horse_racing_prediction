@@ -44,11 +44,12 @@ async def test_predict_race_returns_horse_predictions():
         fake_model.predict.return_value = np.array([1.0])
         mock_get_model.return_value = fake_model
 
-        results = await predict_race(race_id=1, session=mock_session)
+        results = await predict_race(mock_session, 1)
 
     assert len(results) == 1
     assert isinstance(results[0], HorsePrediction)
-    assert 0 < results[0].win_probability < 1
+    # With a single horse, win_probability normalises to 1.0; just check it is positive
+    assert results[0].win_probability > 0
     assert results[0].win_probability != results[0].place_probability or len(results) == 1
 
 
@@ -57,3 +58,37 @@ async def test_predict_race_probabilities_sum_to_one():
     """With 3 horses, win probabilities should sum to ~1."""
     # This test requires a real model; skip if no production model is available
     pytest.skip("Requires production model — run after Task 10 (run_train)")
+
+
+@pytest.mark.asyncio
+async def test_predict_race_stale_fallback():
+    """When model inference fails, stale cached predictions are returned."""
+    mock_db = AsyncMock()
+    race_id = 99
+
+    # Build a fake HorsePrediction that _load_stale_predictions would return
+    stale_pred = HorsePrediction(
+        horse_id=42,
+        horse_name="청춘스타",
+        program_number=0,
+        win_probability=0.25,
+        place_probability=0.60,
+        model_versions={"version": "v1.0.0", "status": "stale"},
+        features_snapshot={},
+        computed_at=datetime.datetime.now(datetime.timezone.utc),
+    )
+
+    # Patch _predict_race_impl to simulate a failure (e.g. caused by _get_model
+    # raising FileNotFoundError in a context where it is not caught internally).
+    # Patch _load_stale_predictions to return our stale prediction.
+    with patch(
+        "app.ml.predict.service._predict_race_impl",
+        side_effect=FileNotFoundError("no model file"),
+    ), patch(
+        "app.ml.predict.service._load_stale_predictions",
+        new=AsyncMock(return_value=[stale_pred]),
+    ):
+        result = await predict_race(mock_db, race_id)
+
+    assert len(result) > 0
+    assert result[0].model_versions.get("status") == "stale"
