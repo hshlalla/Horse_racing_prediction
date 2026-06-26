@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import RaceDetailPage from "./pages/RaceDetailPage";
@@ -6,6 +7,9 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import FavoritesPage from "./pages/FavoritesPage";
 import NotFoundPage from "./pages/NotFoundPage";
+
+const MlMonitoringPage = lazy(() => import("./pages/admin/MlMonitoringPage"));
+const DataManagementPage = lazy(() => import("./pages/admin/DataManagementPage"));
 
 function App() {
   const today = new Date().toISOString().split("T")[0];
@@ -19,6 +23,22 @@ function App() {
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route
+          path="/admin/ml"
+          element={
+            <Suspense fallback={<div className="p-4 text-slate-400">Loading...</div>}>
+              <MlMonitoringPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/admin/data"
+          element={
+            <Suspense fallback={<div className="p-4 text-slate-400">Loading...</div>}>
+              <DataManagementPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </div>
