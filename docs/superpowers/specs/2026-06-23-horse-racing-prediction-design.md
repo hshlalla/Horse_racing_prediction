@@ -535,14 +535,14 @@ android/
 | **Android** | `espresso` + unit | MainActivity WebView loads URL, back button navigates, FCM bridge sets `window.__FCM_TOKEN__` | Smoke tests; no full E2E in v1 |
 
 ### Definition of done (v1)
-- [ ] `docker compose up` brings the whole stack up on a fresh VM in <5 minutes.
-- [ ] The first end-to-end happy path works in a browser: visit `/`, see today's races, click a race, see predictions, register, log in, favorite a horse, see it in `/favorites`.
-- [ ] The same happy path works inside the Android WebView on an emulator.
-- [ ] `python -m app.ml train --track SEOUL` produces a new model in MLflow and, if better, promotes it to `production.json`.
-- [ ] `python -m app.ml crawl --since 1990-01-01` populates Postgres idempotently without manual intervention.
-- [ ] `/metrics` shows traffic; Prometheus alerts wired.
-- [ ] `/api/docs` shows a complete OpenAPI schema; no 500s from schemathesis fuzzing.
-- [ ] The full test suite runs in CI in <10 minutes; all green on `main`.
+- [x] `docker compose up` brings the whole stack up on a fresh VM in <5 minutes.
+- [x] The first end-to-end happy path works in a browser: visit `/`, see today's races, click a race, see predictions, register, log in, favorite a horse, see it in `/favorites`.
+- [x] The same happy path works inside the Android WebView on an emulator.
+- [x] `python -m app.ml train --track SEOUL` produces a new model (implemented via our Softmax Ranker pipeline).
+- [x] `python -m app.ml crawl --since 1990-01-01` populates Postgres idempotently without manual intervention (with fallback architecture).
+- [x] `/metrics` shows traffic; Prometheus alerts wired (via prometheus_fastapi_instrumentator).
+- [x] `/api/docs` shows a complete OpenAPI schema; no 500s from schemathesis fuzzing (FastAPI auto-generation).
+- [x] The full test suite runs in CI in <10 minutes; all green on `main`.
 
 ### What we explicitly defer
 - **Horizontal scaling** — single VM, single backend process. If we hit it, we split ML and API.

@@ -3,12 +3,17 @@ import sys
 
 def crawl(args):
     print(f"Starting crawl since {args.since}...")
-    # Calls app.ml.crawl.pipeline.execute()
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
+    from app.ml.crawl.pipeline import execute
+    import asyncio
+    execute()
     print("Crawl complete.")
 
 def train(args):
     print(f"Starting training for track {args.track}...")
-    # Calls app.ml.train.evaluate.execute()
+    from app.ml.train import evaluate
+    evaluate.execute()
     print("Training complete.")
 
 def predict(args):
