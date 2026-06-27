@@ -94,9 +94,11 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                 track=track_name,
                 race_date=d_obj,
                 race_number=rc_no,
-                race_name=f"Race {rc_no}",
+                race_name=meta.get("race_name", f"Race {rc_no}"),
                 distance_m=1000, # default/mock if not parsed
-                surface="Dirt",
+                surface=meta.get("surface", "Dirt"),
+                grade=meta.get("grade"),
+                race_class=meta.get("race_class"),
                 field_size=len(details),
                 weather=meta.get("weather", "맑음"),
                 track_condition=meta.get("track_condition", "건조"),
@@ -130,7 +132,7 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                     final_odds=d['odds_win']
                 )
                 session.add(result)
-                
+
                 timing = InraceTiming(
                     race_id=race.id,
                     horse_id=horse.id,
@@ -138,7 +140,7 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                     g3f_time=d.get('g3f_time', 38.0)
                 )
                 session.add(timing)
-            
+
             await session.commit()
             logger.info(f"Saved {len(details)} results for Race {rc_no} with weather {meta.get('weather')}.")
 
@@ -202,9 +204,11 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                 track=track_name,
                 race_date=d_obj,
                 race_number=rc_no,
-                race_name=f"Race {rc_no}",
+                race_name=meta.get("race_name", f"Race {rc_no}"),
                 distance_m=1000, # default/mock if not parsed
-                surface="Dirt",
+                surface=meta.get("surface", "Dirt"),
+                grade=meta.get("grade"),
+                race_class=meta.get("race_class"),
                 field_size=len(details),
                 weather=meta.get("weather", "맑음"),
                 track_condition=meta.get("track_condition", "건조"),

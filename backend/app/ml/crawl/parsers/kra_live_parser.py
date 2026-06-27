@@ -109,8 +109,38 @@ class KRALiveParser:
                     meta["distance_m"] = int(txt[:-1])
                     break
                     
-        # 1.5 Parse YouTube video URL
+        # 1.5 Parse grade, race_class, surface from race title
         import re
+
+        # KRA race title selector candidates: h4 with race-related class, .raceInfo, .raceName, caption
+        title_elem = (
+            soup.find("h4", class_=re.compile(r"race", re.I))
+            or soup.find(class_=re.compile(r"raceName|raceInfo|raceTitle", re.I))
+            or soup.find("caption")
+        )
+        title_text = title_elem.get_text(strip=True) if title_elem else ""
+
+        # Surface: 잔디 → Turf, anything else (or missing) → Dirt
+        if "잔디" in title_text:
+            meta["surface"] = "Turf"
+        else:
+            meta["surface"] = "Dirt"
+
+        # Grade: G1 / G2 / G3 pattern
+        grade_match = re.search(r"G[1-3]", title_text)
+        meta["grade"] = grade_match.group(0) if grade_match else None
+
+        # Race class: known KRA class keywords
+        CLASS_KEYWORDS = ["오픈", "특별", "일반", "선발", "등록", "초청"]
+        meta["race_class"] = next(
+            (kw for kw in CLASS_KEYWORDS if kw in title_text), None
+        )
+
+        # Capture race_name from the title text if available
+        if title_text:
+            meta["race_name"] = title_text
+
+        # 1.6 Parse YouTube video URL
         youtube_match = re.search(r"youtube\.com/watch\?v=([^'\"]+)", html_content)
         if youtube_match:
             video_id = youtube_match.group(1)
