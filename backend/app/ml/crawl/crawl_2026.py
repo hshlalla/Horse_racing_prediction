@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.session import async_session_factory
-from app.db.models.crawl import Horse, Jockey, Trainer, Race, RaceEntry, RaceResult, InraceTiming
+from app.db.models.crawl import Horse, Jockey, Trainer, Race, RaceEntry, RaceResult, InraceTiming, OddsSnapshot
 from app.ml.crawl.parsers.kra_live_parser import KRALiveParser
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
@@ -111,6 +111,7 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
 
             for idx, d in enumerate(details):
                 horse = await get_or_create(session, Horse, name=d['horse_name'], sex="M")
+                d["_horse_db_id"] = horse.id
                 jockey = await get_or_create(session, Jockey, name=d['jockey'])
                 trainer = await get_or_create(session, Trainer, name=d['trainer'])
 
@@ -140,6 +141,25 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                     g3f_time=d.get('g3f_time', 38.0)
                 )
                 session.add(timing)
+
+            # Save odds snapshots for live/upcoming races (not completed ones)
+            if not parsed_data.get("meta", {}).get("completed", False):
+                snapshot_time = datetime.datetime.now(datetime.timezone.utc)
+                for horse_data in details:
+                    horse_id_snap = horse_data.get("_horse_db_id")
+                    if not horse_id_snap or not race:
+                        continue
+                    odds_win = horse_data.get("odds_win")
+                    if odds_win is None:
+                        continue
+                    snap = OddsSnapshot(
+                        race_id=race.id,
+                        horse_id=horse_id_snap,
+                        snapshot_time=snapshot_time,
+                        win_odds=float(odds_win),
+                        place_odds=horse_data.get("odds_place"),
+                    )
+                    session.add(snap)
 
             await session.commit()
             logger.info(f"Saved {len(details)} results for Race {rc_no} with weather {meta.get('weather')}.")
@@ -221,6 +241,7 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
 
             for idx, d in enumerate(details):
                 horse = await get_or_create(session, Horse, name=d['horse_name'], sex="M")
+                d["_horse_db_id"] = horse.id
                 jockey = await get_or_create(session, Jockey, name=d['jockey'])
                 trainer = await get_or_create(session, Trainer, name=d['trainer'])
 
@@ -242,7 +263,7 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                     final_odds=d['odds_win']
                 )
                 session.add(result)
-                
+
                 timing = InraceTiming(
                     race_id=race.id,
                     horse_id=horse.id,
@@ -250,7 +271,26 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                     g3f_time=d.get('g3f_time', 38.0)
                 )
                 session.add(timing)
-            
+
+            # Save odds snapshots for live/upcoming races (not completed ones)
+            if not parsed_data.get("meta", {}).get("completed", False):
+                snapshot_time = datetime.datetime.now(datetime.timezone.utc)
+                for horse_data in details:
+                    horse_id_snap = horse_data.get("_horse_db_id")
+                    if not horse_id_snap or not race:
+                        continue
+                    odds_win = horse_data.get("odds_win")
+                    if odds_win is None:
+                        continue
+                    snap = OddsSnapshot(
+                        race_id=race.id,
+                        horse_id=horse_id_snap,
+                        snapshot_time=snapshot_time,
+                        win_odds=float(odds_win),
+                        place_odds=horse_data.get("odds_place"),
+                    )
+                    session.add(snap)
+
             await session.commit()
             logger.info(f"Saved {len(details)} results for {rc_date} Race {rc_no} with weather {meta.get('weather')}.")
 

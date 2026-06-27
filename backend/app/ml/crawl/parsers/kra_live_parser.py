@@ -196,6 +196,7 @@ class KRALiveParser:
                 break
                 
         if not target_table:
+            meta["completed"] = False
             return {"meta": meta, "horses": results}
             
         rows = target_table.find_all('tr')
@@ -265,6 +266,12 @@ class KRALiveParser:
                     logger.debug(f"Failed to parse row: {e}")
                     continue
         
+        # Mark race as completed when at least one horse has a numeric rank > 0
+        meta["completed"] = any(
+            isinstance(h.get("rank"), int) and h["rank"] > 0
+            for h in results
+        )
+
         # 4. Parse Payouts (배당률)
         payouts = {}
         for td in soup.find_all('td', class_='textLeft'):
