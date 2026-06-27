@@ -5,7 +5,7 @@ import os
 
 FEATURES = [
     'jockey_id', 'trainer_id', 'program_number', 'distance_m', 'field_size',
-    'carry_weight_kg', 'body_weight_kg', 'horse_age', 'horse_sex',
+    'carry_weight_kg', 'body_weight_kg', 'morning_odds', 'horse_age', 'horse_sex',
     'track', 'track_condition', 'weather', 'days_since_last_race',
     'horse_win_rate', 'jockey_win_rate', 'trainer_win_rate', 'sire_win_rate',
     'past_avg_s1f_time', 'past_avg_g3f_time',
@@ -150,7 +150,8 @@ def _apply_features(df: pd.DataFrame):
     df['_distance_bucket'] = pd.cut(
         df['distance_m'],
         bins=[0, 1300, 1800, 99999],
-        labels=['short', 'middle', 'long']
+        labels=['short', 'middle', 'long'],
+        right=False,
     )
     df.sort_values(['horse_id', '_distance_bucket', 'race_date'], inplace=True)
     df['distance_win_rate'] = (
