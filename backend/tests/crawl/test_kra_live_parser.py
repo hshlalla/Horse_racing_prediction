@@ -48,15 +48,33 @@ def test_parse_defaults_when_no_header():
 
 SAMPLE_COMPLETED_HTML = """
 <html><body>
-<div class="tableType2"><table><tbody>
-<tr><td>1</td><td>천하무적</td><td>1</td><td>72.3</td><td>2.1</td></tr>
-</tbody></table></div>
+<table>
+  <tr>
+    <th>착순</th><th>마번</th><th>마명</th><th>성</th><th>성별</th><th>마령</th>
+    <th>부담중량</th><th>기수</th><th>기수</th><th>조교사</th><th>소유주</th>
+    <th>마주</th><th>마체중</th><th>단승</th><th>연승</th>
+  </tr>
+  <tr>
+    <td>1</td><td>3</td><td>천하무적</td><td>수</td><td>M</td><td>4세</td>
+    <td>57.0</td><td>김철수</td><td>김철수</td><td>이영희</td><td>박민수</td>
+    <td>박민수</td><td>490(+2)</td><td>3.5</td><td>1.8</td>
+  </tr>
+</table>
+</body></html>
+"""
+
+SAMPLE_NOT_COMPLETED_HTML = """
+<html><body>
+<h4 class="raceInfo">제1경주 G1 잔디 1200M</h4>
 </body></html>
 """
 
 def test_completed_flag_true_when_result_present():
     result = KRALiveParser.parse_race_detail(SAMPLE_COMPLETED_HTML)
-    # The sample has a horse with finish_position=1 — should be completed
-    # (parser may not parse the exact sample — adjust if needed after seeing real output)
-    # At minimum, the key must exist
     assert "completed" in result["meta"]
+    assert result["meta"]["completed"] is True
+
+def test_completed_flag_false_when_no_results():
+    result = KRALiveParser.parse_race_detail(SAMPLE_NOT_COMPLETED_HTML)
+    assert "completed" in result["meta"]
+    assert result["meta"]["completed"] is False
