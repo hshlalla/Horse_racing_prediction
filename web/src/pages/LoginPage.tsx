@@ -4,68 +4,84 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { login } from "../api/auth";
-import { useTranslation } from "../hooks/useTranslation";
 
-const loginSchema = z.object({
-  email: z.string().email({ message: "Invalid email address" }),
-  password: z.string().min(8, { message: "Password must be at least 8 characters" }),
+const schema = z.object({
+  email: z.string().email({ message: "유효한 이메일 주소를 입력하세요" }),
+  password: z.string().min(8, { message: "비밀번호는 8자 이상이어야 합니다" }),
 });
-
-type LoginFormValues = z.infer<typeof loginSchema>;
+type FormValues = z.infer<typeof schema>;
 
 export default function LoginPage() {
   const [error, setError] = useState("");
   const navigate = useNavigate();
-  const { t } = useTranslation();
 
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema)
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormValues>({
+    resolver: zodResolver(schema),
   });
 
-  const onSubmit = async (data: LoginFormValues) => {
+  const onSubmit = async (data: FormValues) => {
     try {
       await login(data.email, data.password);
       navigate("/");
     } catch (err: any) {
-      setError(err.response?.data?.error?.message || "Login failed");
+      setError(err.response?.data?.error?.message || "로그인에 실패했습니다.");
     }
   };
 
   return (
-    <div className="max-w-md mx-auto min-h-screen flex items-center justify-center p-4 bg-gray-50">
-      <div className="bg-white p-8 rounded-xl shadow-lg w-full">
-        <h1 className="text-2xl font-bold mb-6 text-center text-slate-900">{t("app.login")}</h1>
-        {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+    <div className="max-w-md mx-auto min-h-screen bg-slate-950 flex items-center justify-center p-6">
+      <div className="w-full bg-slate-900 border border-white/10 rounded-2xl p-8 shadow-2xl">
+        <h1 className="text-2xl font-black mb-2 text-center bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+          KRA Quant
+        </h1>
+        <p className="text-center text-slate-500 text-sm mb-8">로그인</p>
+
+        {error && (
+          <div className="bg-rose-500/10 text-rose-400 border border-rose-500/30 p-3 rounded-xl mb-5 text-sm">
+            {error}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
-            <input 
-              type="email" 
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">이메일</label>
+            <input
+              type="email"
               {...register("email")}
-              className={`w-full border rounded p-2 outline-none focus:ring-1 ${errors.email ? 'border-red-500 focus:ring-red-500' : 'focus:border-blue-500 focus:ring-blue-500'}`}
+              className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none focus:ring-2 transition-all placeholder:text-slate-600 [color-scheme:dark] ${
+                errors.email ? "border-rose-500/50 focus:ring-rose-500/30" : "border-white/10 focus:ring-indigo-500/40 focus:border-indigo-500/50"
+              }`}
+              placeholder="user@example.com"
             />
-            {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
+            {errors.email && <p className="text-rose-400 text-xs mt-1">{errors.email.message}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
-            <input 
-              type="password" 
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">비밀번호</label>
+            <input
+              type="password"
               {...register("password")}
-              className={`w-full border rounded p-2 outline-none focus:ring-1 ${errors.password ? 'border-red-500 focus:ring-red-500' : 'focus:border-blue-500 focus:ring-blue-500'}`}
+              className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none focus:ring-2 transition-all placeholder:text-slate-600 ${
+                errors.password ? "border-rose-500/50 focus:ring-rose-500/30" : "border-white/10 focus:ring-indigo-500/40 focus:border-indigo-500/50"
+              }`}
+              placeholder="••••••••"
             />
-            {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>}
+            {errors.password && <p className="text-rose-400 text-xs mt-1">{errors.password.message}</p>}
           </div>
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             disabled={isSubmitting}
-            className="w-full bg-blue-600 text-white font-bold py-2 rounded hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="w-full bg-indigo-500 hover:bg-indigo-600 active:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-colors disabled:opacity-50 mt-2"
           >
-            {isSubmitting ? "Logging in..." : t("app.login")}
+            {isSubmitting ? "로그인 중..." : "로그인"}
           </button>
         </form>
-        <div className="mt-4 text-center text-sm">
-          Don't have an account? <Link to="/register" className="text-blue-600 hover:underline">{t("app.register")}</Link>
-        </div>
+
+        <p className="mt-5 text-center text-xs text-slate-500">
+          계정이 없으신가요?{" "}
+          <Link to="/register" className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors">
+            회원가입
+          </Link>
+        </p>
       </div>
     </div>
   );

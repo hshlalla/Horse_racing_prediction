@@ -95,7 +95,7 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                 race_date=d_obj,
                 race_number=rc_no,
                 race_name=meta.get("race_name", f"Race {rc_no}"),
-                distance_m=1000, # default/mock if not parsed
+                distance_m=meta.get("distance_m", 1200),
                 surface=meta.get("surface", "Dirt"),
                 grade=meta.get("grade"),
                 race_class=meta.get("race_class"),
@@ -122,7 +122,8 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                     trainer_id=trainer.id,
                     program_number=d['horse_no'],
                     carry_weight_kg=d.get('carry_weight', 53.0),
-                    morning_odds=d['odds_win']
+                    body_weight_kg=d.get('weight'),
+                    morning_odds=d.get('odds_win')
                 )
                 session.add(entry)
 
@@ -130,7 +131,7 @@ async def crawl_and_save_date(session, rc_date: str, meet: str = "1"):
                     race_id=race.id,
                     horse_id=horse.id,
                     finish_position=d['rank'],
-                    final_odds=d['odds_win']
+                    final_odds=d.get('odds_win')
                 )
                 session.add(result)
 
@@ -225,7 +226,7 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                 race_date=d_obj,
                 race_number=rc_no,
                 race_name=meta.get("race_name", f"Race {rc_no}"),
-                distance_m=1000, # default/mock if not parsed
+                distance_m=meta.get("distance_m", 1200),
                 surface=meta.get("surface", "Dirt"),
                 grade=meta.get("grade"),
                 race_class=meta.get("race_class"),
@@ -252,7 +253,8 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                     trainer_id=trainer.id,
                     program_number=d['horse_no'],
                     carry_weight_kg=d.get('carry_weight', 53.0),
-                    morning_odds=d['odds_win']
+                    body_weight_kg=d.get('weight'),
+                    morning_odds=d.get('odds_win')
                 )
                 session.add(entry)
 
@@ -260,7 +262,7 @@ async def crawl_date_bruteforce(session, rc_date: str, meet: str = "1"):
                     race_id=race.id,
                     horse_id=horse.id,
                     finish_position=d['rank'],
-                    final_odds=d['odds_win']
+                    final_odds=d.get('odds_win')
                 )
                 session.add(result)
 

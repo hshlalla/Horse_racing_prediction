@@ -3,9 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDataStatus,
   retryDate,
-  CrawlFailureInfo,
-  CrawlStateInfo,
 } from "../../api/admin";
+import type { CrawlFailureInfo, CrawlStateInfo } from "../../api/admin";
 
 function CrawlStateRow({ state }: { state: CrawlStateInfo }) {
   const statusColor =

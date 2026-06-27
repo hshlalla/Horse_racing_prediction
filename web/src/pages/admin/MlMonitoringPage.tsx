@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchMlStatus, TrackModelInfo } from "../../api/admin";
+import { fetchMlStatus } from "../../api/admin";
+import type { TrackModelInfo } from "../../api/admin";
 import {
   BarChart,
   Bar,

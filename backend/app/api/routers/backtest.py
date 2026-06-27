@@ -35,8 +35,6 @@ async def get_daily_backtest(date: str = Query(..., description="YYYY-MM-DD form
 
         for race in races:
             payouts = race.payouts or {}
-            if not payouts:
-                continue
 
             # Load results
             res_q = await session.execute(

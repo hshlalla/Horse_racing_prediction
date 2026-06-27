@@ -1,7 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from .jobs import crawl_job, predict_job, train_job, notify_job
+from .jobs import crawl_job, predict_job, train_job, notify_job, odds_job
 
 
 def setup_triggers(scheduler: AsyncIOScheduler):
@@ -24,6 +24,13 @@ def setup_triggers(scheduler: AsyncIOScheduler):
         train_job,
         trigger=CronTrigger(day_of_week="sun", hour=19, minute=0, timezone="UTC"),
         id="train",
+    )
+
+    # Live odds refresh every 10 minutes (job itself guards 09:00~18:00 KST)
+    scheduler.add_job(
+        odds_job,
+        trigger=IntervalTrigger(minutes=10),
+        id="odds",
     )
 
     # Notify users about upcoming races every 5 minutes

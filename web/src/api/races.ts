@@ -1,5 +1,10 @@
 import { apiClient } from "./client";
 
+export async function fetchLatestRaceDate(): Promise<string> {
+  const res = await apiClient.get<{ date: string }>("/races/latest-date");
+  return res.data.date;
+}
+
 export async function fetchRaces(date: string, track?: string) {
   const params = track ? { date, track } : { date };
   const res = await apiClient.get("/races", { params });

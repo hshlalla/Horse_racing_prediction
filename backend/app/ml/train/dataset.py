@@ -213,18 +213,28 @@ def load_dataset_pg(db_url: str):
 
     df = _apply_features(df)
 
-    if df['race_date'].min() >= pd.to_datetime('2026-01-01'):
-        n = len(df)
-        train_df = df.iloc[:int(n*0.7)].copy()
-        val_df = df.iloc[int(n*0.7):int(n*0.85)].copy()
-        test_df = df.iloc[int(n*0.85):].copy()
-    else:
-        train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
-        val_mask   = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
-        test_mask  = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
-        train_df = df[train_mask].copy()
-        val_df   = df[val_mask].copy()
-        test_df  = df[test_mask].copy()
+    train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
+    val_mask   = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
+    test_mask  = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
+    train_df = df[train_mask].copy()
+    val_df   = df[val_mask].copy()
+    test_df  = df[test_mask].copy()
+
+    # Fall back to fractional split when val is empty (e.g. partial crawl with no 2025 data)
+    if len(val_df) < 50:
+        dates = df['race_id'].map(df.groupby('race_id')['race_date'].first())
+        unique_races = df[['race_id','race_date']].drop_duplicates().sort_values('race_date')
+        n_races = len(unique_races)
+        cut70 = unique_races.iloc[int(n_races * 0.70)]['race_date']
+        cut85 = unique_races.iloc[int(n_races * 0.85)]['race_date']
+        train_df = df[df['race_date'] <  cut70].copy()
+        val_df   = df[(df['race_date'] >= cut70) & (df['race_date'] < cut85)].copy()
+        test_df  = df[df['race_date'] >= cut85].copy()
+        import logging
+        logging.getLogger(__name__).warning(
+            "Val set too small — using date-quantile split: train<%.10s val<%.10s test>=%.10s",
+            cut70, cut85, cut85,
+        )
 
     return (
         train_df,

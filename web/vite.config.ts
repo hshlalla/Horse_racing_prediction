@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // @ts-expect-error - TS complains about react() not being callable
   plugins: [react()],
   server: {
     proxy: {

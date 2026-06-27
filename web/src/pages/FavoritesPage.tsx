@@ -1,109 +1,89 @@
-import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchFavorites, removeFavorite } from "../api/favorites";
 import { useAuthStore } from "../lib/store";
 import { useNavigate } from "react-router-dom";
-import { Trash2, Bell, BellOff } from "lucide-react";
+import { Star, Trash2 } from "lucide-react";
 import { format } from "date-fns";
-import { useTranslation } from "../hooks/useTranslation";
-
-// Mock countdown hook for next race
-function useNextRaceCountdown(targetDateStr: string) {
-  const [timeLeft, setTimeLeft] = useState("");
-
-  useEffect(() => {
-    const target = new Date(targetDateStr).getTime();
-    const interval = setInterval(() => {
-      const now = new Date().getTime();
-      const diff = target - now;
-      if (diff <= 0) {
-        setTimeLeft("Started");
-      } else {
-        const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setTimeLeft(`Starts in ${h}h ${m}m`);
-      }
-    }, 60000); // update every minute
-    return () => clearInterval(interval);
-  }, [targetDateStr]);
-
-  return timeLeft || "Calculating...";
-}
-
-function FavoriteRow({ fav, removeFav }: { fav: any, removeFav: any }) {
-  const [reminder, setReminder] = useState(false);
-  const countdown = useNextRaceCountdown(fav.next_race_time || new Date(Date.now() + 86400000).toISOString()); // dummy 24h
-  
-  return (
-    <div className="flex justify-between items-center border p-4 rounded-xl shadow-sm bg-white">
-      <div>
-        <div className="font-bold text-lg">{fav.horse?.name || "Mock Horse"}</div>
-        <div className="text-xs text-gray-500 mb-2">Favorited on {format(new Date(fav.created_at), "yyyy-MM-dd")}</div>
-        <div className="text-sm font-semibold text-blue-600">
-          Next: {countdown}
-        </div>
-      </div>
-      <div className="flex gap-2">
-        <button 
-          onClick={() => setReminder(!reminder)}
-          className={`p-2 rounded-full ${reminder ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`}
-        >
-          {reminder ? <Bell size={20} /> : <BellOff size={20} />}
-        </button>
-        <button 
-          onClick={() => removeFav.mutate(fav.horse_id)}
-          className="text-red-500 p-2 hover:bg-red-50 rounded-full"
-        >
-          <Trash2 size={20} />
-        </button>
-      </div>
-    </div>
-  );
-}
 
 export default function FavoritesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
   const isAuth = !!useAuthStore((state) => state.accessToken);
-
-  if (!isAuth) {
-    navigate("/login");
-    return null;
-  }
 
   const { data: favorites, isLoading } = useQuery({
     queryKey: ["favorites"],
     queryFn: fetchFavorites,
+    enabled: isAuth,
   });
 
   const removeFav = useMutation({
     mutationFn: (id: number) => removeFavorite(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["favorites"] });
-    }
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["favorites"] }),
   });
 
-  if (isLoading) return <div className="p-4">Loading favorites...</div>;
+  if (!isAuth) {
+    return (
+      <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center gap-4 pb-24">
+        <Star size={48} className="text-slate-600" />
+        <p className="text-lg font-semibold text-slate-300">로그인이 필요합니다</p>
+        <button
+          onClick={() => navigate("/login")}
+          className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-6 py-2.5 rounded-xl transition-colors"
+        >
+          로그인
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-7xl mx-auto min-h-screen bg-gray-50">
-      <header className="p-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
-        <h1 className="text-xl font-bold text-slate-900">{t("app.favorites")}</h1>
-        <button onClick={() => navigate("/")} className="text-blue-600 text-sm font-medium">Home</button>
+    <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-24">
+      <header className="p-4 border-b border-white/10 sticky top-0 bg-slate-950/90 backdrop-blur-md z-10 shadow-lg shadow-black/20">
+        <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+          즐겨찾기
+        </h1>
       </header>
-      
-      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {!favorites?.items || favorites.items.length === 0 ? (
-          <div className="text-center text-gray-500 mt-10 p-6 bg-white rounded-xl border border-dashed">
-            You have no favorite horses yet.
-          </div>
-        ) : (
-          favorites.items.map((fav: any) => (
-            <FavoriteRow key={fav.horse_id} fav={fav} removeFav={removeFav} />
-          ))
-        )}
-      </div>
+
+      {isLoading ? (
+        <div className="p-4 space-y-3 mt-2">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-20 bg-white/5 rounded-2xl border border-white/5 animate-pulse" />
+          ))}
+        </div>
+      ) : !favorites?.items || favorites.items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center mt-32 gap-4 text-center px-8">
+          <Star size={48} className="text-slate-700" />
+          <p className="text-lg font-semibold text-slate-400">아직 즐겨찾기한 말이 없습니다</p>
+          <p className="text-sm text-slate-600">경주 상세 화면에서 ⭐를 눌러 추가하세요.</p>
+        </div>
+      ) : (
+        <div className="p-4 space-y-3">
+          {favorites.items.map((fav: any) => (
+            <div
+              key={fav.horse_id}
+              className="flex items-center justify-between bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/8 transition-colors"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-yellow-500/20 to-amber-500/20 border border-yellow-500/20 flex items-center justify-center">
+                  <Star size={20} className="text-yellow-400" fill="currentColor" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-100 text-base">{fav.horse?.name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    등록일 {format(new Date(fav.created_at), "yyyy.MM.dd")}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => removeFav.mutate(fav.horse_id)}
+                className="p-2 rounded-full text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

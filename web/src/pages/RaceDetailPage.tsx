@@ -1,8 +1,13 @@
+import { useState } from "react";
+import { format } from "date-fns";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchRaceDetail, fetchPredictions } from "../api/races";
 import { fetchFavorites, addFavorite, removeFavorite } from "../api/favorites";
 import { ProbabilityBar } from "../components/ProbabilityBar";
+import { Toast } from "../components/Toast";
+import { HorseDetailDrawer } from "../components/HorseDetailDrawer";
+import { BettingSuggestion } from "../components/BettingSuggestion";
 import { ArrowLeft, Star } from "lucide-react";
 import { useAuthStore } from "../lib/store";
 
@@ -13,6 +18,8 @@ export default function RaceDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isAuth = !!useAuthStore((state) => state.accessToken);
+  const [toastMessage, setToastMessage] = useState<{msg: string, type: "success"|"info"|"error"} | null>(null);
+  const [drawerHorse, setDrawerHorse] = useState<{name: string, features: any} | null>(null);
 
   const { data: race } = useQuery({
     queryKey: ["race", raceId],
@@ -46,16 +53,36 @@ export default function RaceDetailPage() {
         await addFavorite(horseId);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, { isFav }) => {
       queryClient.invalidateQueries({ queryKey: ["favorites"] });
+      setToastMessage({ 
+        msg: isFav ? "관심 마필에서 해제되었습니다." : "⭐ 관심 마필로 등록되었습니다!", 
+        type: isFav ? "info" : "success" 
+      });
     }
   });
 
-  if (!race) return <div className="p-4 flex justify-center mt-10 text-slate-400">Loading race details...</div>;
+  if (!race) return (
+    <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 p-4">
+      <div className="animate-pulse">
+        <div className="h-20 bg-white/5 rounded-2xl mb-4 border border-white/5"></div>
+        <div className="h-16 bg-white/5 rounded-xl mb-4 border border-white/5 max-w-sm"></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1,2,3,4,5,6].map(i => <div key={i} className="h-48 bg-white/5 rounded-2xl border border-white/5 shadow-lg"></div>)}
+        </div>
+      </div>
+    </div>
+  );
 
   const predMap = new Map(predictions?.items?.map((p: any) => [p.horse_id, p]));
   const hasResults = race.entries?.some((e: any) => e.finish_position != null);
   const isPastRace = hasResults;
+
+  // Latest odds update time from predictions
+  const latestComputedAt = predictions?.items?.reduce((latest: string | null, p: any) => {
+    if (!latest) return p.computed_at;
+    return p.computed_at > latest ? p.computed_at : latest;
+  }, null as string | null);
 
   // Determine medal colors
   const getMedalBadge = (pos: number | null) => {
@@ -66,7 +93,7 @@ export default function RaceDetailPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-10">
+    <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-28">
       <header className="p-4 border-b border-white/10 sticky top-0 bg-slate-950/80 backdrop-blur-md z-20 shadow-lg shadow-black/20">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
@@ -99,6 +126,11 @@ export default function RaceDetailPage() {
           <span className="bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-1 rounded-full flex items-center gap-1 shadow-[0_0_10px_rgba(99,102,241,0.2)]">
             ✨ Ensemble AI
           </span>
+          {latestComputedAt && (
+            <span className="bg-slate-900 px-2 py-1 rounded border border-white/5 text-slate-500">
+              🕐 배당 {format(new Date(latestComputedAt), "HH:mm")} 기준
+            </span>
+          )}
         </div>
       </header>
       
@@ -139,11 +171,126 @@ export default function RaceDetailPage() {
         </div>
       )}
 
+      {(() => {
+        // Compute betting suggestions
+        const horses = race.entries?.map((e: any) => {
+          const pred = predMap.get(e.horse_id) as any;
+          const winProb = pred?.win_probability || 0;
+          const placeProb = pred?.place_probability || 0;
+          const odds = e.morning_odds || 0;
+          const winEv = winProb * odds;
+          const placeEv = placeProb * odds;
+          return {
+            horse_id: e.horse_id,
+            program_number: e.program_number,
+            horse_name: e.horse_name,
+            winProb,
+            placeProb,
+            odds,
+            winEv,
+            placeEv
+          };
+        }) || [];
+
+        const hFmt = (h: any) => ({ program_number: h.program_number, horse_name: h.horse_name });
+
+        // Sorting
+        const winSorted = [...horses].sort((a, b) => b.winProb - a.winProb);
+        const placeSorted = [...horses].sort((a, b) => b.placeProb - a.placeProb);
+        const winEvSorted = [...horses].sort((a, b) => b.winEv - a.winEv);
+        const placeEvSorted = [...horses].sort((a, b) => b.placeEv - a.placeEv);
+
+        const w1 = winSorted[0], w2 = winSorted[1], w3 = winSorted[2];
+        const p1 = placeSorted[0], p2 = placeSorted[1];
+        const we1 = winEvSorted[0];
+        const pe1 = placeEvSorted[0];
+
+        const aggressiveWin2nd = winSorted.find(h => h.horse_id !== we1?.horse_id) || w2;
+        const aggressiveWin3rd = winSorted.find(h => h.horse_id !== we1?.horse_id && h.horse_id !== aggressiveWin2nd?.horse_id) || w3;
+        const aggressivePlace2nd = placeSorted.find(h => h.horse_id !== pe1?.horse_id) || p2;
+
+        const stable = {
+          win: w1 && w1.winProb > 0 ? {
+            horses: [hFmt(w1)],
+            reason: `AI 우승 확률 1위 (${(w1.winProb * 100).toFixed(1)}%)`,
+            badge: "가장 확실한 픽"
+          } : null,
+          place: p1 && p1.placeProb > 0 ? {
+            horses: [hFmt(p1)],
+            reason: `AI 연승 확률 1위 (${(p1.placeProb * 100).toFixed(1)}%)`,
+            badge: "안전 자산"
+          } : null,
+          quinella: w1 && w2 ? {
+            horses: [hFmt(w1), hFmt(w2)],
+            reason: "승률 1위 + 2위 조합"
+          } : null,
+          exacta: w1 && w2 ? {
+            horses: [hFmt(w1), hFmt(w2)],
+            reason: "승률 1위 ➔ 승률 2위 정배당",
+            badge: "정배당의 정석"
+          } : null,
+          quinellaPlace: p1 && p2 ? {
+            horses: [hFmt(p1), hFmt(p2)],
+            reason: "연승 확률 1위 + 2위 조합"
+          } : null,
+          trio: w1 && w2 && w3 ? {
+            horses: [hFmt(w1), hFmt(w2), hFmt(w3)],
+            reason: "승률 1위 + 2위 + 3위 조합"
+          } : null,
+          trifecta: w1 && w2 && w3 ? {
+            horses: [hFmt(w1), hFmt(w2), hFmt(w3)],
+            reason: "승률 1위 ➔ 2위 ➔ 3위",
+            badge: "가장 안정적인 삼쌍승"
+          } : null
+        };
+
+        const aggressive = {
+          win: we1 && we1.winEv > 0 ? {
+            horses: [hFmt(we1)],
+            reason: `기대수익(EV) 1위 (배당 ${we1.odds}배)`,
+            badge: "한방 역배당"
+          } : null,
+          place: pe1 && pe1.placeEv > 0 ? {
+            horses: [hFmt(pe1)],
+            reason: `연승 기대수익 1위 (배당 ${pe1.odds}배)`,
+            badge: "가성비 연승픽"
+          } : null,
+          quinella: we1 && aggressiveWin2nd ? {
+            horses: [hFmt(we1), hFmt(aggressiveWin2nd)],
+            reason: "가치마 + 승률 1위 조합"
+          } : null,
+          exacta: we1 && aggressiveWin2nd ? {
+            horses: [hFmt(we1), hFmt(aggressiveWin2nd)],
+            reason: "가치마 1착 ➔ 정배당 2착 콤보",
+            badge: "고배당 쌍승 노리기"
+          } : null,
+          quinellaPlace: pe1 && aggressivePlace2nd ? {
+            horses: [hFmt(pe1), hFmt(aggressivePlace2nd)],
+            reason: "연승 가치마 + 정배당 연승 1위"
+          } : null,
+          trio: we1 && aggressiveWin2nd && aggressiveWin3rd ? {
+            horses: [hFmt(we1), hFmt(aggressiveWin2nd), hFmt(aggressiveWin3rd)],
+            reason: "역배당 1두 + 정배당 2두 조합"
+          } : null,
+          trifecta: we1 && aggressiveWin2nd && aggressiveWin3rd ? {
+            horses: [hFmt(we1), hFmt(aggressiveWin2nd), hFmt(aggressiveWin3rd)],
+            reason: "가치마 1착 ➔ 정배당 2, 3착",
+            badge: "역대급 배당 노리기"
+          } : null
+        };
+
+        return (
+          <div className="p-4 pt-6">
+            <BettingSuggestion stable={stable} aggressive={aggressive} />
+          </div>
+        );
+      })()}
+
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {race.entries?.sort((a: any, b: any) => {
           // ALWAYS sort by AI prediction probability, so the top card is AI's #1 pick
-          const probA = predMap.get(a.horse_id)?.win_probability || 0;
-          const probB = predMap.get(b.horse_id)?.win_probability || 0;
+          const probA = (predMap.get(a.horse_id) as any)?.win_probability || 0;
+          const probB = (predMap.get(b.horse_id) as any)?.win_probability || 0;
           return probB - probA;
         }).map((entry: any, index: number) => {
           const pred = predMap.get(entry.horse_id) as any;
@@ -151,14 +298,39 @@ export default function RaceDetailPage() {
           // Highlight the AI's 1st pick
           const isTopPick = index === 0;
           const medal = getMedalBadge(entry.finish_position);
+          const isValueBet = entry.morning_odds && pred && (pred.win_probability * entry.morning_odds > 1.2);
           
           return (
             <div 
               key={entry.id} 
-              className={`relative bg-white/5 border rounded-2xl p-4 shadow-lg transition-all duration-300 hover:bg-white/10 ${
+              onClick={() => {
+                if (pred?.features_snapshot) {
+                  setDrawerHorse({
+                    name: entry.horse_name,
+                    features: {
+                      win_probability: pred.win_probability,
+                      place_probability: pred.place_probability,
+                      distance_win_rate: pred.features_snapshot.distance_win_rate,
+                      jockey_horse_win_rate: pred.features_snapshot.jockey_horse_win_rate,
+                      horse_win_rate: pred.features_snapshot.horse_win_rate,
+                      past_avg_start_rank: pred.features_snapshot.past_avg_start_rank,
+                      past_avg_mid_rank: pred.features_snapshot.past_avg_mid_rank,
+                      past_avg_finish_rank: pred.features_snapshot.past_avg_finish_rank,
+                      past_avg_g3f_time: pred.features_snapshot.past_avg_g3f_time,
+                      carry_weight_kg: entry.carry_weight_kg,
+                    }
+                  });
+                }
+              }}
+              className={`relative cursor-pointer bg-white/5 border rounded-2xl p-4 shadow-lg transition-all duration-300 hover:bg-white/10 ${
                 isTopPick ? 'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'border-white/10 hover:border-white/20'
-              }`}
+              } ${isValueBet ? 'ring-2 ring-rose-500/50' : ''}`}
             >
+              {isValueBet && (
+                <div className="absolute -top-3 right-4 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-[10px] font-bold px-3 py-0.5 rounded-full shadow-lg shadow-rose-500/40 whitespace-nowrap z-10 animate-pulse">
+                  🔥 Value Bet
+                </div>
+              )}
               {isTopPick && (
                 <div className="absolute -top-px -left-px -right-px h-px bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-50"></div>
               )}
@@ -188,15 +360,25 @@ export default function RaceDetailPage() {
                     <div className="text-xs text-slate-400 font-medium mt-0.5">
                       기수: <span className="text-slate-300">{entry.jockey_name || "-"}</span> • 조교사: <span className="text-slate-300">{entry.trainer_name || "-"}</span>
                     </div>
+                    <div className="flex gap-2 mt-1">
+                      {entry.morning_odds > 0 && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${isValueBet ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-slate-800 text-emerald-400 border-white/5'}`}>
+                          배당 {entry.morning_odds}배
+                        </span>
+                      )}
+                    </div>
                     {entry.finish_time_s && (
-                      <div className="text-xs text-slate-500 mt-0.5">
+                      <div className="text-xs text-slate-500 mt-1">
                         ⏱️ {entry.finish_time_s.toFixed(1)}초
                       </div>
                     )}
                   </div>
                 </div>
                 <button 
-                  onClick={() => toggleFavorite.mutate({ horseId: entry.horse_id, isFav })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFavorite.mutate({ horseId: entry.horse_id, isFav });
+                  }}
                   className={`p-2 rounded-full transition-all duration-300 ${isFav ? 'text-yellow-400 bg-yellow-400/10 shadow-[0_0_15px_rgba(250,204,21,0.2)]' : 'text-slate-600 hover:bg-white/10 hover:text-slate-300'}`}
                 >
                   <Star fill={isFav ? "currentColor" : "none"} size={20}/>
@@ -217,55 +399,27 @@ export default function RaceDetailPage() {
                     </div>
                     <ProbabilityBar probability={pred.place_probability} color="from-teal-400 to-emerald-500" />
                   </div>
-                  {pred.features_snapshot && (
-                    <div className="mt-3 flex flex-col gap-2">
-                      {pred.features_snapshot.past_avg_start_rank && pred.features_snapshot.past_avg_mid_rank && (
-                        (() => {
-                          const s = pred.features_snapshot.past_avg_start_rank;
-                          const m = pred.features_snapshot.past_avg_mid_rank;
-                          let style = { label: "추입 (Closer)", icon: "🚀", color: "text-purple-400 border-purple-400/30 bg-purple-400/10" };
-                          if (s <= 3.5 && m <= 3.5) style = { label: "선행 (Front)", icon: "🏃‍♂️💨", color: "text-red-400 border-red-400/30 bg-red-400/10" };
-                          else if (s > 3.5 && m <= 5.0) style = { label: "선입 (Stalker)", icon: "🐎", color: "text-blue-400 border-blue-400/30 bg-blue-400/10" };
-                          
-                          return (
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${style.color}`}>
-                                {style.icon} {style.label}
-                              </span>
-                            </div>
-                          );
-                        })()
-                      )}
-                      <div className="flex flex-wrap gap-2 text-[10px] uppercase font-bold tracking-wider text-slate-400">
-                        {pred.features_snapshot.horse_win_rate !== undefined && (
-                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            🐎 승률: {(pred.features_snapshot.horse_win_rate * 100).toFixed(1)}%
-                          </span>
-                        )}
-                        {pred.features_snapshot.past_avg_g3f_time !== undefined && (
-                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            ⚡ G3F: {pred.features_snapshot.past_avg_g3f_time.toFixed(1)}s
-                          </span>
-                        )}
-                        {pred.features_snapshot.past_avg_start_rank !== undefined && (
-                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            🏁 출발순위: {pred.features_snapshot.past_avg_start_rank.toFixed(1)}
-                          </span>
-                        )}
-                        {pred.features_snapshot.past_avg_finish_rank !== undefined && (
-                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            🏆 도착순위: {pred.features_snapshot.past_avg_finish_rank.toFixed(1)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {toastMessage && (
+        <Toast 
+          message={toastMessage.msg} 
+          type={toastMessage.type} 
+          onClose={() => setToastMessage(null)} 
+        />
+      )}
+
+      <HorseDetailDrawer 
+        isOpen={!!drawerHorse} 
+        onClose={() => setDrawerHorse(null)} 
+        horseName={drawerHorse?.name || ""} 
+        features={drawerHorse?.features || null} 
+      />
     </div>
   );
 }

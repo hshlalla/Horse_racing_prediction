@@ -44,6 +44,16 @@ class RaceDetailResponse(RaceListResponseItem):
     payouts: Optional[dict] = None
     entries: List[RaceEntryResponse]
 
+@router.get("/latest-date")
+async def get_latest_race_date(db: AsyncSession = Depends(get_db)):
+    """Return the most recent date that has at least one race."""
+    from sqlalchemy import select, func
+    from app.db.models.crawl import Race
+    result = await db.execute(select(func.max(Race.race_date)))
+    latest = result.scalar()
+    return {"date": (latest or datetime.date.today()).isoformat()}
+
+
 @router.get("", response_model=RaceListResponse)
 async def list_races(
     date: datetime.date = Query(...),
