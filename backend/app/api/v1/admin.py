@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
 from app.db.models.crawl import CrawlFailure, CrawlState, Horse, Jockey, Race
+from app.ml.crawl.crawl_entries import crawl_entries
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -66,6 +67,11 @@ class AdminDataStatus(BaseModel):
 class RetryRequest(BaseModel):
     track: str
     date: datetime.date
+
+
+class CrawlEntriesRequest(BaseModel):
+    date: datetime.date
+    tracks: Optional[List[str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -178,3 +184,25 @@ async def retry_crawl(req: RetryRequest):
 
     asyncio.create_task(_run())
     return {"ok": True, "track": req.track, "date": str(req.date)}
+
+
+@router.post("/crawl/entries")
+async def crawl_race_entries(req: CrawlEntriesRequest):
+    """Trigger 출마표 (pre-race entry) crawl for a target date. Runs in background."""
+    tracks = req.tracks or ["SEOUL", "BUSAN", "JEJU"]
+    target = req.date
+
+    async def _run():
+        try:
+            result = await crawl_entries(target_date=target, tracks=tracks)
+            logger.info("entry_crawl_done date=%s result=%s", target, result)
+        except Exception as exc:
+            logger.error("entry_crawl_failed date=%s error=%s", target, exc)
+
+    asyncio.create_task(_run())
+    return {
+        "ok": True,
+        "date": str(target),
+        "tracks": tracks,
+        "message": "Entry crawl started in background",
+    }
