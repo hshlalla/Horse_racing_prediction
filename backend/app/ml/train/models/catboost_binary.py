@@ -2,6 +2,19 @@ import pandas as pd
 import numpy as np
 
 
+class ModelShim:
+    def __init__(self, m, cat_cols):
+        self.m = m
+        self.cat_cols = cat_cols
+        self.calibrator = None
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        X = X.copy()
+        for c in self.cat_cols:
+            if c in X.columns:
+                X[c] = X[c].astype(str)
+        return self.m.predict(X)
+
 def train_catboost(train_df: pd.DataFrame, val_df: pd.DataFrame,
                    features: list, target: str):
     """
@@ -46,28 +59,16 @@ def train_catboost(train_df: pd.DataFrame, val_df: pd.DataFrame,
     )
 
     model = CatBoostRanker(
-        iterations=2000,
-        learning_rate=0.03,
-        depth=8,
+        iterations=500,
+        learning_rate=0.05,
+        depth=6,
         loss_function='YetiRank',
         eval_metric='NDCG',
         random_seed=42,
         od_type='Iter',
-        od_wait=100,
+        od_wait=50,
         verbose=0,  # suppress output in production
     )
     model.fit(train_pool, eval_set=val_pool)
-
-    class ModelShim:
-        def __init__(self, m, cat_cols):
-            self.m = m
-            self.cat_cols = cat_cols
-
-        def predict(self, X: pd.DataFrame) -> np.ndarray:
-            X = X.copy()
-            for c in self.cat_cols:
-                if c in X.columns:
-                    X[c] = X[c].astype(str)
-            return self.m.predict(X)
 
     return ModelShim(model, cat_features_in_use)

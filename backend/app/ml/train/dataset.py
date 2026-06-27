@@ -10,7 +10,7 @@ FEATURES = [
     'horse_win_rate', 'jockey_win_rate', 'trainer_win_rate', 'sire_win_rate',
     'past_avg_s1f_time', 'past_avg_g3f_time',
     'humidity', 'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank',
-    'surface', 'grade', 'body_weight_delta_kg'
+    'surface', 'grade', 'body_weight_delta_kg', 'morning_odds_rank'
 ]
 TARGET = 'relevance'
 
@@ -190,23 +190,18 @@ def load_dataset_pg(db_url: str):
 
     df = _apply_features(df)
 
-    # Use a dynamic chronological split: 70% Train, 15% Val, 15% Test based on unique races
-    unique_races = df[['race_date', 'race_id']].drop_duplicates().sort_values(['race_date', 'race_id'])
-    n_races = len(unique_races)
-    
-    if n_races < 100:
-        return df.copy(), df.copy(), df.copy(), FEATURES, TARGET
-
-    train_idx = int(n_races * 0.70)
-    val_idx = int(n_races * 0.85)
-
-    train_races = unique_races.iloc[:train_idx]
-    val_races = unique_races.iloc[train_idx:val_idx]
-    test_races = unique_races.iloc[val_idx:]
-
-    train_df = df.merge(train_races, on=['race_date', 'race_id']).copy()
-    val_df = df.merge(val_races, on=['race_date', 'race_id']).copy()
-    test_df = df.merge(test_races, on=['race_date', 'race_id']).copy()
+    if df['race_date'].min() >= pd.to_datetime('2026-01-01'):
+        n = len(df)
+        train_df = df.iloc[:int(n*0.7)].copy()
+        val_df = df.iloc[int(n*0.7):int(n*0.85)].copy()
+        test_df = df.iloc[int(n*0.85):].copy()
+    else:
+        train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
+        val_mask   = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
+        test_mask  = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
+        train_df = df[train_mask].copy()
+        val_df   = df[val_mask].copy()
+        test_df  = df[test_mask].copy()
 
     return (
         train_df,
@@ -226,26 +221,20 @@ def load_dataset(db_path: str = "test_dod.db"):
     conn.close()
     
     df = _apply_features(df)
-    
-    # Split Dataset
-    # Use a dynamic chronological split: 70% Train, 15% Val, 15% Test based on unique races
-    unique_races = df[['race_date', 'race_id']].drop_duplicates().sort_values(['race_date', 'race_id'])
-    n_races = len(unique_races)
-    
-    if n_races < 100:
-        return df.copy(), df.copy(), df.copy(), FEATURES, TARGET
 
-    train_idx = int(n_races * 0.70)
-    val_idx = int(n_races * 0.85)
+    if df['race_date'].min() >= pd.to_datetime('2026-01-01'):
+        n = len(df)
+        train_df = df.iloc[:int(n*0.7)].copy()
+        val_df = df.iloc[int(n*0.7):int(n*0.85)].copy()
+        test_df = df.iloc[int(n*0.85):].copy()
+    else:
+        train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
+        val_mask   = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
+        test_mask  = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
+        train_df = df[train_mask].copy()
+        val_df   = df[val_mask].copy()
+        test_df  = df[test_mask].copy()
 
-    train_races = unique_races.iloc[:train_idx]
-    val_races = unique_races.iloc[train_idx:val_idx]
-    test_races = unique_races.iloc[val_idx:]
-
-    train_df = df.merge(train_races, on=['race_date', 'race_id']).copy()
-    val_df = df.merge(val_races, on=['race_date', 'race_id']).copy()
-    test_df = df.merge(test_races, on=['race_date', 'race_id']).copy()
-    
     return train_df, val_df, test_df, FEATURES, TARGET
 
 if __name__ == "__main__":
