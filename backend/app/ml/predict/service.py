@@ -68,6 +68,8 @@ FEATURES = [
     "grade",
     "body_weight_delta_kg",
     "morning_odds_rank",
+    "distance_win_rate",
+    "jockey_horse_win_rate",
 ]
 
 # ---------------------------------------------------------------------------
@@ -288,6 +290,93 @@ async def _get_prev_body_weight(
     return float(weight) if weight else 500.0
 
 
+async def _get_sire_win_rate(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> float:
+    """
+    Compute historical win rate of this horse's sire (father).
+    Looks up pedigree first; if no pedigree, returns 0.0.
+    """
+    from sqlalchemy import func, case
+    from app.db.models.crawl import Pedigree
+
+    # Step 1: get sire_id
+    pedigree_stmt = select(Pedigree.sire_id).where(Pedigree.horse_id == horse_id)
+    pedigree_result = await session.execute(pedigree_stmt)
+    sire_id = pedigree_result.scalar()
+    if not sire_id:
+        return 0.0
+
+    # Step 2: compute sire's own historical win rate (as a racing horse) as proxy
+    stmt = (
+        select(
+            func.avg(case((RaceResult.finish_position == 1, 1), else_=0))
+        )
+        .select_from(RaceResult)
+        .join(Race, RaceResult.race_id == Race.id)
+        .where(RaceResult.horse_id == sire_id)
+        .where(Race.race_date < as_of_date)
+    )
+    result = await session.execute(stmt)
+    rate = result.scalar()
+    return float(rate) if rate is not None else 0.0
+
+
+async def _get_distance_win_rate(
+    session: AsyncSession,
+    horse_id: int,
+    distance_bucket: str,
+    as_of_date: datetime.date,
+) -> float:
+    """Win rate for this horse in the given distance bucket (short/middle/long)."""
+    from sqlalchemy import func, case
+    bucket_filter = {
+        'short':  (Race.distance_m < 1300),
+        'middle': (Race.distance_m >= 1300) & (Race.distance_m <= 1800),
+        'long':   (Race.distance_m > 1800),
+    }[distance_bucket]
+
+    stmt = (
+        select(func.avg(case((RaceResult.finish_position == 1, 1), else_=0)))
+        .select_from(RaceResult)
+        .join(Race, RaceResult.race_id == Race.id)
+        .where(RaceResult.horse_id == horse_id)
+        .where(bucket_filter)
+        .where(Race.race_date < as_of_date)
+    )
+    result = await session.execute(stmt)
+    rate = result.scalar()
+    return float(rate) if rate is not None else 0.0
+
+
+async def _get_pair_win_rate(
+    session: AsyncSession,
+    jockey_id: int,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> float:
+    """Historical win rate when this specific jockey rode this specific horse."""
+    from sqlalchemy import func, case
+    stmt = (
+        select(func.avg(case((RaceResult.finish_position == 1, 1), else_=0)))
+        .select_from(RaceResult)
+        .join(Race, RaceResult.race_id == Race.id)
+        .join(
+            RaceEntry,
+            (RaceEntry.race_id == RaceResult.race_id)
+            & (RaceEntry.horse_id == RaceResult.horse_id),
+        )
+        .where(RaceResult.horse_id == horse_id)
+        .where(RaceEntry.jockey_id == jockey_id)
+        .where(Race.race_date < as_of_date)
+    )
+    result = await session.execute(stmt)
+    rate = result.scalar()
+    return float(rate) if rate is not None else 0.0
+
+
 # ---------------------------------------------------------------------------
 # Stale-cache helpers
 # ---------------------------------------------------------------------------
@@ -487,21 +576,24 @@ async def _predict_race_impl(
             else 0.0
         )
 
-        from app.db.models.crawl import Pedigree
-        ped_res = await session.execute(
-            select(Pedigree.sire_id).where(Pedigree.horse_id == entry.horse_id)
-        )
-        sire_id = ped_res.scalar_one_or_none()
-        sire_win_rate = (
-            await _get_win_rate(session, sire_id, "sire_id", today)
-            if sire_id
-            else 0.0
-        )
+        sire_win_rate = await _get_sire_win_rate(session, entry.horse_id, today)
 
         prev_body_weight = await _get_prev_body_weight(
             session, entry.horse_id, today
         )
         body_weight_delta = (entry.body_weight_kg or 500.0) - prev_body_weight
+
+        distance_bucket = (
+            'short' if race.distance_m < 1300
+            else 'middle' if race.distance_m <= 1800
+            else 'long'
+        )
+        distance_win_rate = await _get_distance_win_rate(
+            session, entry.horse_id, distance_bucket, today
+        )
+        jockey_horse_win_rate = await _get_pair_win_rate(
+            session, entry.jockey_id or 0, entry.horse_id, today
+        )
 
         row: dict = {
             "jockey_id": entry.jockey_id or 0,
@@ -532,6 +624,8 @@ async def _predict_race_impl(
             "grade": race.grade or "unknown",
             "body_weight_delta_kg": body_weight_delta,
             "morning_odds_rank": 0,   # placeholder — filled after the loop
+            "distance_win_rate": distance_win_rate,
+            "jockey_horse_win_rate": jockey_horse_win_rate,
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],

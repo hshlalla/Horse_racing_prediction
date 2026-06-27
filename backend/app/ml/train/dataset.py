@@ -10,7 +10,8 @@ FEATURES = [
     'horse_win_rate', 'jockey_win_rate', 'trainer_win_rate', 'sire_win_rate',
     'past_avg_s1f_time', 'past_avg_g3f_time',
     'humidity', 'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank',
-    'surface', 'grade', 'body_weight_delta_kg', 'morning_odds_rank'
+    'surface', 'grade', 'body_weight_delta_kg', 'morning_odds_rank',
+    'distance_win_rate', 'jockey_horse_win_rate',
 ]
 TARGET = 'relevance'
 
@@ -144,6 +145,28 @@ def _apply_features(df: pd.DataFrame):
         .transform(lambda x: x.shift(1).ewm(span=5, min_periods=1).mean())
         .fillna(0)
     )
+
+    # Distance bucket win rate (short / middle / long)
+    df['_distance_bucket'] = pd.cut(
+        df['distance_m'],
+        bins=[0, 1300, 1800, 99999],
+        labels=['short', 'middle', 'long']
+    )
+    df.sort_values(['horse_id', '_distance_bucket', 'race_date'], inplace=True)
+    df['distance_win_rate'] = (
+        df.groupby(['horse_id', '_distance_bucket'], observed=True)['is_win']
+        .transform(lambda x: x.shift(1).ewm(span=5, min_periods=1).mean())
+        .fillna(0.0)
+    )
+
+    # Jockey-horse pair win rate
+    df.sort_values(['jockey_id', 'horse_id', 'race_date'], inplace=True)
+    df['jockey_horse_win_rate'] = (
+        df.groupby(['jockey_id', 'horse_id'])['is_win']
+        .transform(lambda x: x.shift(1).ewm(span=5, min_periods=1).mean())
+        .fillna(0.0)
+    )
+
     df['relevance'] = df['finish_position'].apply(
         lambda x: 3 if x == 1 else (2 if x == 2 else (1 if x == 3 else 0))
     )

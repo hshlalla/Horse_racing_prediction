@@ -126,3 +126,19 @@ async def test_get_win_rate_returns_float():
     rate = await _get_win_rate(mock_session, 1, "jockey_id",
                                datetime.date(2026, 6, 1))
     assert abs(rate - 0.15) < 1e-9
+
+
+@pytest.mark.asyncio
+async def test_get_sire_win_rate_returns_zero_for_no_pedigree():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.ml.predict.service import _get_sire_win_rate
+    import datetime
+
+    mock_session = AsyncMock()
+    # No pedigree row: sire_id lookup returns None
+    mock_result = MagicMock()
+    mock_result.scalar.return_value = None
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    rate = await _get_sire_win_rate(mock_session, 999, datetime.date(2026, 6, 1))
+    assert rate == 0.0

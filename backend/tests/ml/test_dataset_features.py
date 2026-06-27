@@ -75,3 +75,26 @@ def test_morning_odds_rank_within_race(raw_df):
     # race1: horse10 odds=3.5, horse20 odds=2.0 → horse20 rank=1, horse10 rank=2
     assert race1[race1["horse_id"] == 20]["morning_odds_rank"].values[0] == 1
     assert race1[race1["horse_id"] == 10]["morning_odds_rank"].values[0] == 2
+
+
+def test_distance_win_rate_no_leakage(raw_df):
+    df = _apply_features(raw_df.copy())
+    # Horse 10 and 20 both appear first in race_id=1 — no history yet, should be 0
+    first_race = df[df["race_id"] == 1]
+    assert (first_race["distance_win_rate"] == 0.0).all()
+
+
+def test_jockey_horse_win_rate_no_leakage(raw_df):
+    df = _apply_features(raw_df.copy())
+    first_race = df[df["race_id"] == 1]
+    assert (first_race["jockey_horse_win_rate"] == 0.0).all()
+
+
+def test_distance_win_rate_updates_after_win(raw_df):
+    df = _apply_features(raw_df.copy())
+    # Horse 10 wins race 1 (finish_position=1, is_win=1) at 1200m (short).
+    # In race 2, horse 10 runs 1400m (middle) — different bucket, should still be 0
+    horse10_r2 = df[(df["horse_id"] == 10) & (df["race_id"] == 2)]
+    # Horse 20 wins race 2 at 1400m (middle). Their distance_win_rate in race 2 is still 0 (first race in middle bucket).
+    horse20_r2 = df[(df["horse_id"] == 20) & (df["race_id"] == 2)]
+    assert horse20_r2["distance_win_rate"].values[0] == 0.0
