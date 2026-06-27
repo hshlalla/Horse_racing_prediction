@@ -127,8 +127,9 @@ def create_app() -> FastAPI:
     from app.api.v1 import router as v1_router
     app.include_router(v1_router, prefix="/api/v1")
 
-    from app.api.routers import reports
+    from app.api.routers import reports, backtest
     app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
+    app.include_router(backtest.router, prefix="/api/reports", tags=["Reports"])
 
     # Static web app — served last so API routes take priority
     import pathlib

@@ -2,7 +2,7 @@ import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
-from app.db.models.crawl import Race, RaceEntry, Horse, Jockey, Trainer
+from app.db.models.crawl import Race, RaceEntry, RaceResult, Horse, Jockey, Trainer
 
 
 async def get_races_by_date(db: AsyncSession, date: datetime.date, track: str = None) -> list[Race]:
@@ -27,4 +27,13 @@ async def get_race_detail(db: AsyncSession, race_id: int) -> Optional[Race]:
         .where(Race.id == race_id)
     )
     result = await db.execute(query)
-    return result.scalars().first()
+    race = result.scalars().first()
+    
+    if race:
+        # Load race results (finish positions)
+        results_q = await db.execute(
+            select(RaceResult).where(RaceResult.race_id == race_id)
+        )
+        race._loaded_results = {r.horse_id: r for r in results_q.scalars().all()}
+    
+    return race

@@ -6,6 +6,8 @@ import { ProbabilityBar } from "../components/ProbabilityBar";
 import { ArrowLeft, Star } from "lucide-react";
 import { useAuthStore } from "../lib/store";
 
+const trackNameMap: Record<string, string> = { SEOUL: "서울", BUSAN: "부산", JEJU: "제주" };
+
 export default function RaceDetailPage() {
   const { date, raceId } = useParams();
   const navigate = useNavigate();
@@ -52,12 +54,16 @@ export default function RaceDetailPage() {
   if (!race) return <div className="p-4 flex justify-center mt-10 text-slate-400">Loading race details...</div>;
 
   const predMap = new Map(predictions?.items?.map((p: any) => [p.horse_id, p]));
+  const hasResults = race.entries?.some((e: any) => e.finish_position != null);
+  const isPastRace = hasResults;
 
-  const sortedEntries = [...race.entries].sort((a: any, b: any) => {
-    const probA = predMap.get(a.horse_id)?.win_probability || 0;
-    const probB = predMap.get(b.horse_id)?.win_probability || 0;
-    return probB - probA;
-  });
+  // Determine medal colors
+  const getMedalBadge = (pos: number | null) => {
+    if (pos === 1) return { emoji: "🥇", label: "1착", cls: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40" };
+    if (pos === 2) return { emoji: "🥈", label: "2착", cls: "bg-slate-400/20 text-slate-300 border-slate-400/40" };
+    if (pos === 3) return { emoji: "🥉", label: "3착", cls: "bg-amber-600/20 text-amber-400 border-amber-600/40" };
+    return null;
+  };
 
   return (
     <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-10">
@@ -71,11 +77,18 @@ export default function RaceDetailPage() {
               <ArrowLeft size={20}/>
             </button>
             <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent tracking-tight">
-              {race.track} R{race.race_number}
+              {trackNameMap[race.track] || race.track} 제{race.race_number}경주
             </h1>
           </div>
-          <div className="text-sm font-semibold bg-white/10 px-3 py-1 rounded-full border border-white/5 shadow-inner">
-            {race.distance_m}m
+          <div className="flex items-center gap-2">
+            {isPastRace && (
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                결과 확정
+              </span>
+            )}
+            <div className="text-sm font-semibold bg-white/10 px-3 py-1 rounded-full border border-white/5 shadow-inner">
+              {race.distance_m}m
+            </div>
           </div>
         </div>
         <div className="flex gap-2 text-xs font-medium text-slate-400 mt-2">
@@ -97,37 +110,90 @@ export default function RaceDetailPage() {
         </div>
       )}
 
+      {/* Payouts section for past races */}
+      {isPastRace && race.payouts && (
+        <div className="px-4 py-4 border-b border-white/5 bg-slate-900/30">
+          <h3 className="text-sm font-bold text-slate-300 mb-2">💰 배당률</h3>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {race.payouts.win?.map((p: any, i: number) => (
+              <span key={`w${i}`} className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 px-2 py-1 rounded">
+                단승 {p.numbers}번 — {p.odds}배
+              </span>
+            ))}
+            {race.payouts.place?.map((p: any, i: number) => (
+              <span key={`p${i}`} className="bg-teal-500/10 text-teal-300 border border-teal-500/30 px-2 py-1 rounded">
+                연승 {p.numbers}번 — {p.odds}배
+              </span>
+            ))}
+            {race.payouts.quinella?.map((p: any, i: number) => (
+              <span key={`q${i}`} className="bg-purple-500/10 text-purple-300 border border-purple-500/30 px-2 py-1 rounded">
+                복승 {p.numbers} — {p.odds}배
+              </span>
+            ))}
+            {race.payouts.trio?.map((p: any, i: number) => (
+              <span key={`t${i}`} className="bg-pink-500/10 text-pink-300 border border-pink-500/30 px-2 py-1 rounded">
+                삼복승 {p.numbers} — {p.odds}배
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {race.entries?.sort((a: any, b: any) => {
+          // If results exist, sort by finish_position; otherwise by prediction
+          if (isPastRace) {
+            const posA = a.finish_position ?? 999;
+            const posB = b.finish_position ?? 999;
+            return posA - posB;
+          }
           const probA = predMap.get(a.horse_id)?.win_probability || 0;
           const probB = predMap.get(b.horse_id)?.win_probability || 0;
-          return probB - probA; // Descending order
+          return probB - probA;
         }).map((entry: any, index: number) => {
           const pred = predMap.get(entry.horse_id) as any;
           const isFav = favSet.has(entry.horse_id);
-          const isTopPick = index === 0; // The 1st pick by AI
+          const isTopPick = !isPastRace && index === 0;
+          const medal = getMedalBadge(entry.finish_position);
           
           return (
             <div 
               key={entry.id} 
-              className={`relative bg-white/5 border rounded-2xl p-4 shadow-lg transition-all duration-300 hover:bg-white/10 ${isTopPick ? 'border-indigo-500/50 shadow-indigo-500/10' : 'border-white/10 hover:border-white/20'}`}
+              className={`relative bg-white/5 border rounded-2xl p-4 shadow-lg transition-all duration-300 hover:bg-white/10 ${
+                medal ? `border-${medal.cls.includes('yellow') ? 'yellow' : medal.cls.includes('amber') ? 'amber' : 'slate'}-500/30` :
+                isTopPick ? 'border-indigo-500/50 shadow-indigo-500/10' : 'border-white/10 hover:border-white/20'
+              }`}
             >
               {isTopPick && (
                 <div className="absolute -top-px -left-px -right-px h-px bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-50"></div>
               )}
               <div className="flex justify-between items-start">
                 <div className="flex gap-4 items-center">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg shadow-inner ${isTopPick ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white' : 'bg-slate-800 text-slate-300 border border-white/5'}`}>
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg shadow-inner ${
+                    entry.finish_position === 1 ? 'bg-gradient-to-br from-yellow-500 to-amber-600 text-white' :
+                    isTopPick ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white' : 
+                    'bg-slate-800 text-slate-300 border border-white/5'
+                  }`}>
                     {entry.program_number}
                   </div>
                   <div>
                     <div className="font-bold text-slate-100 text-lg leading-tight flex items-center gap-2">
                       {entry.horse_name}
+                      {medal && (
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${medal.cls}`}>
+                          {medal.emoji} {medal.label}
+                        </span>
+                      )}
                       {isTopPick && <span className="flex h-2 w-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]"></span>}
                     </div>
                     <div className="text-xs text-slate-400 font-medium mt-0.5">
-                      J: <span className="text-slate-300">{entry.jockey_name || "-"}</span> • T: <span className="text-slate-300">{entry.trainer_name || "-"}</span>
+                      기수: <span className="text-slate-300">{entry.jockey_name || "-"}</span> • 조교사: <span className="text-slate-300">{entry.trainer_name || "-"}</span>
                     </div>
+                    {entry.finish_time_s && (
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        ⏱️ {entry.finish_time_s.toFixed(1)}초
+                      </div>
+                    )}
                   </div>
                 </div>
                 <button 
@@ -142,13 +208,13 @@ export default function RaceDetailPage() {
                 <div className="mt-5 pl-14 space-y-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 flex justify-between">
-                      <span>Win Probability</span>
+                      <span>우승 확률</span>
                     </div>
                     <ProbabilityBar probability={pred.win_probability} color="from-indigo-500 to-purple-500" />
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 flex justify-between">
-                      <span>Place Probability</span>
+                      <span>연승 확률</span>
                     </div>
                     <ProbabilityBar probability={pred.place_probability} color="from-teal-400 to-emerald-500" />
                   </div>
@@ -184,17 +250,12 @@ export default function RaceDetailPage() {
                         )}
                         {pred.features_snapshot.past_avg_start_rank !== undefined && (
                           <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            🏁 S-R: {pred.features_snapshot.past_avg_start_rank.toFixed(1)}
-                          </span>
-                        )}
-                        {pred.features_snapshot.past_avg_mid_rank !== undefined && (
-                          <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            🔄 M-R: {pred.features_snapshot.past_avg_mid_rank.toFixed(1)}
+                            🏁 출발순위: {pred.features_snapshot.past_avg_start_rank.toFixed(1)}
                           </span>
                         )}
                         {pred.features_snapshot.past_avg_finish_rank !== undefined && (
                           <span className="bg-slate-900/80 px-2 py-1 rounded border border-white/5">
-                            🏆 F-R: {pred.features_snapshot.past_avg_finish_rank.toFixed(1)}
+                            🏆 도착순위: {pred.features_snapshot.past_avg_finish_rank.toFixed(1)}
                           </span>
                         )}
                       </div>

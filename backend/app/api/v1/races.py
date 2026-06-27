@@ -33,11 +33,15 @@ class RaceEntryResponse(BaseModel):
     trainer_name: Optional[str]
     carry_weight_kg: Optional[float]
     morning_odds: Optional[float]
+    finish_position: Optional[int] = None
+    finish_time_s: Optional[float] = None
 
 class RaceDetailResponse(RaceListResponseItem):
     track_condition: Optional[str]
     weather: Optional[str]
+    humidity: Optional[int] = None
     video_url: Optional[str]
+    payouts: Optional[dict] = None
     entries: List[RaceEntryResponse]
 
 @router.get("", response_model=RaceListResponse)
@@ -62,8 +66,11 @@ async def get_race(race_id: int, db: AsyncSession = Depends(get_db)):
     if not race:
         return error_response("RACE_NOT_FOUND", "Race not found", 404)
     
+    results_map = getattr(race, '_loaded_results', {})
+    
     entries = []
     for e in race.entries:
+        result = results_map.get(e.horse_id)
         entries.append(RaceEntryResponse(
             id=e.id,
             program_number=e.program_number,
@@ -72,7 +79,9 @@ async def get_race(race_id: int, db: AsyncSession = Depends(get_db)):
             jockey_name=e.jockey.name if e.jockey else None,
             trainer_name=e.trainer.name if e.trainer else None,
             carry_weight_kg=e.carry_weight_kg,
-            morning_odds=e.morning_odds
+            morning_odds=e.morning_odds,
+            finish_position=result.finish_position if result else None,
+            finish_time_s=result.finish_time_s if result else None,
         ))
     
     return RaceDetailResponse(
@@ -80,6 +89,9 @@ async def get_race(race_id: int, db: AsyncSession = Depends(get_db)):
         race_name=race.race_name, distance_m=race.distance_m, surface=race.surface,
         post_time=race.post_time, field_size=race.field_size,
         track_condition=race.track_condition, weather=race.weather,
+        humidity=race.humidity,
         video_url=race.video_url,
+        payouts=race.payouts,
         entries=entries
     )
+
