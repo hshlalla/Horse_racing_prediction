@@ -662,12 +662,17 @@ async def _predict_race_impl(
     # ------------------------------------------------------------------
     # 7. Cold-start blending
     # ------------------------------------------------------------------
-    # Horses with fewer than 3 lifetime starts are blended toward the
-    # field-average probability to avoid over-confident predictions.
-    field_avg = 1.0 / len(probs)
+    # Horses with fewer than 3 lifetime starts are blended toward an
+    # inverse-odds anchor (1/morning_odds normalised) so that market
+    # information is preserved when horse history is absent.
+    # If no odds are available the anchor degrades to field average.
+    raw_odds = np.array([max(r["morning_odds"], 1.0) for r in rows])
+    inv_odds = 1.0 / raw_odds
+    anchor = inv_odds / inv_odds.sum()   # normalised inverse-odds
+
     blended = np.array([
         min(row["_n_starts"] / 3.0, 1.0) * probs[i]
-        + (1 - min(row["_n_starts"] / 3.0, 1.0)) * field_avg
+        + (1 - min(row["_n_starts"] / 3.0, 1.0)) * anchor[i]
         for i, row in enumerate(rows)
     ])
     blended = blended / blended.sum()
