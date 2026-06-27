@@ -463,6 +463,11 @@ async def _predict_race_impl(
     else:
         probs = softmax(raw_scores)
 
+    # Apply isotonic calibration if the model has one
+    if getattr(model, "calibrator", None) is not None:
+        from app.ml.predict.calibration import apply_calibration
+        probs = apply_calibration(probs, model.calibrator)
+
     # ------------------------------------------------------------------
     # 7. Cold-start blending (DISABLED FOR POC)
     # ------------------------------------------------------------------

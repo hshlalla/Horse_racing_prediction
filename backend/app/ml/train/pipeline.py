@@ -10,11 +10,15 @@ import logging
 import os
 from pathlib import Path
 
+import numpy as np
+from scipy.special import softmax as _softmax
+
 from app.ml.train.dataset import load_dataset_pg
 from app.ml.train.models.lgbm_binary import train_lgbm
 from app.ml.train.models.catboost_binary import train_catboost
 from app.ml.train.models.ensemble import build_ensemble, _race_log_loss
 from app.ml.train.promote import promote_if_better, compute_kelly_roi, _model_dir
+from app.ml.predict.calibration import fit_calibration
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +86,24 @@ def run_train(track: str, db_url: str) -> dict:
     # Build ensemble (weights are inverse-log-loss of each sub-model).
     logger.info("[%s] Building ensemble", track)
     ensemble = build_ensemble([model_lgbm, model_catboost], track_val, features, target)
+
+    # Fit isotonic calibrator on val set softmax probabilities.
+    _val_probs: list = []
+    _val_wins: list = []
+    for _, _race in track_val.groupby("race_id"):
+        _scores = ensemble.predict(_race[features])
+        _p = _softmax(_scores)
+        _val_probs.extend(_p.tolist())
+        _val_wins.extend(
+            (_race["finish_position"] == 1).astype(int).tolist()
+        )
+
+    if len(set(_val_wins)) == 2:  # need both classes to fit isotonic
+        ensemble.calibrator = fit_calibration(
+            np.array(_val_probs), np.array(_val_wins)
+        )
+    else:
+        ensemble.calibrator = None
 
     # Evaluate.
     val_log_loss = _race_log_loss(ensemble, track_val, features, target)
