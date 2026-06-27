@@ -105,6 +105,23 @@ def run_train(track: str, db_url: str) -> dict:
     else:
         ensemble.calibrator = None
 
+    # Run SHAP feature importance analysis using the LightGBM model
+    try:
+        from app.ml.train.shap_analysis import run_shap_analysis
+        # Pass the raw LGBMRanker model (.m) instead of the ModelShim wrapper
+        shap_result = run_shap_analysis(
+            model_lgbm.m, track_val, features,
+            output_dir=str(_model_dir() / track)
+        )
+        if shap_result["drop_candidates"]:
+            logger.info(
+                "[%s] SHAP drop candidates: %s",
+                track, shap_result["drop_candidates"]
+            )
+        ensemble.shap_importance = shap_result.get("importance", {})
+    except Exception as exc:
+        logger.warning("[%s] SHAP analysis skipped: %s", track, exc)
+
     # Evaluate.
     val_log_loss = _race_log_loss(ensemble, track_val, features, target)
     val_roi = compute_kelly_roi(ensemble, track_val, features)

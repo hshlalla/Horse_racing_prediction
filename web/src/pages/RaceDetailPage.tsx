@@ -141,36 +141,36 @@ export default function RaceDetailPage() {
 
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         {race.entries?.sort((a: any, b: any) => {
-          // If results exist, sort by finish_position; otherwise by prediction
-          if (isPastRace) {
-            const posA = a.finish_position ?? 999;
-            const posB = b.finish_position ?? 999;
-            return posA - posB;
-          }
+          // ALWAYS sort by AI prediction probability, so the top card is AI's #1 pick
           const probA = predMap.get(a.horse_id)?.win_probability || 0;
           const probB = predMap.get(b.horse_id)?.win_probability || 0;
           return probB - probA;
         }).map((entry: any, index: number) => {
           const pred = predMap.get(entry.horse_id) as any;
           const isFav = favSet.has(entry.horse_id);
-          const isTopPick = !isPastRace && index === 0;
+          // Highlight the AI's 1st pick
+          const isTopPick = index === 0;
           const medal = getMedalBadge(entry.finish_position);
           
           return (
             <div 
               key={entry.id} 
               className={`relative bg-white/5 border rounded-2xl p-4 shadow-lg transition-all duration-300 hover:bg-white/10 ${
-                medal ? `border-${medal.cls.includes('yellow') ? 'yellow' : medal.cls.includes('amber') ? 'amber' : 'slate'}-500/30` :
-                isTopPick ? 'border-indigo-500/50 shadow-indigo-500/10' : 'border-white/10 hover:border-white/20'
+                isTopPick ? 'border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]' : 'border-white/10 hover:border-white/20'
               }`}
             >
               {isTopPick && (
                 <div className="absolute -top-px -left-px -right-px h-px bg-gradient-to-r from-transparent via-indigo-500 to-transparent opacity-50"></div>
               )}
-              <div className="flex justify-between items-start">
+              {isTopPick && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-500 text-white text-[10px] font-bold px-3 py-0.5 rounded-full shadow-lg shadow-indigo-500/30 whitespace-nowrap">
+                  🤖 AI 1순위 추천
+                </div>
+              )}
+              <div className="flex justify-between items-start mt-2">
                 <div className="flex gap-4 items-center">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg shadow-inner ${
-                    entry.finish_position === 1 ? 'bg-gradient-to-br from-yellow-500 to-amber-600 text-white' :
+                    medal && medal.emoji === '🥇' ? 'bg-gradient-to-br from-yellow-500 to-amber-600 text-white shadow-yellow-500/30' :
                     isTopPick ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white' : 
                     'bg-slate-800 text-slate-300 border border-white/5'
                   }`}>
@@ -180,11 +180,10 @@ export default function RaceDetailPage() {
                     <div className="font-bold text-slate-100 text-lg leading-tight flex items-center gap-2">
                       {entry.horse_name}
                       {medal && (
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${medal.cls}`}>
-                          {medal.emoji} {medal.label}
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${medal.cls} shadow-sm`}>
+                          {medal.emoji} 실제 {medal.label}
                         </span>
                       )}
-                      {isTopPick && <span className="flex h-2 w-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]"></span>}
                     </div>
                     <div className="text-xs text-slate-400 font-medium mt-0.5">
                       기수: <span className="text-slate-300">{entry.jockey_name || "-"}</span> • 조교사: <span className="text-slate-300">{entry.trainer_name || "-"}</span>

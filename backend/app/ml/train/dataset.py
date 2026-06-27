@@ -151,7 +151,6 @@ def _apply_features(df: pd.DataFrame):
         df['distance_m'],
         bins=[0, 1300, 1800, 99999],
         labels=['short', 'middle', 'long'],
-        right=False,
     )
     df.sort_values(['horse_id', '_distance_bucket', 'race_date'], inplace=True)
     df['distance_win_rate'] = (

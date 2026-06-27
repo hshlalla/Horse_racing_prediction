@@ -30,7 +30,7 @@ def train_lgbm(train_df: pd.DataFrame, val_df: pd.DataFrame,
     val_df = val_df.sort_values("race_id").copy()
 
     cat_features = ["jockey_id", "trainer_id", "horse_sex", "track",
-                    "track_condition", "weather"]
+                    "track_condition", "weather", "surface", "grade"]
     cat_in_use = [c for c in cat_features if c in features]
 
     X_train = train_df[features].copy()
@@ -57,10 +57,10 @@ def train_lgbm(train_df: pd.DataFrame, val_df: pd.DataFrame,
     model = lgb.LGBMRanker(
         objective="lambdarank",
         metric="ndcg",
-        n_estimators=500,
-        learning_rate=0.05,
-        num_leaves=31,
-        min_child_samples=5,
+        n_estimators=2000,
+        learning_rate=0.03,
+        num_leaves=63,
+        min_child_samples=10,
         random_state=42,
         verbose=-1,
     )
@@ -70,7 +70,7 @@ def train_lgbm(train_df: pd.DataFrame, val_df: pd.DataFrame,
         eval_set=[(X_val, y_val)],
         eval_group=[val_groups],
         callbacks=[
-            lgb.early_stopping(stopping_rounds=50, verbose=False),
+            lgb.early_stopping(stopping_rounds=100, verbose=False),
             lgb.log_evaluation(period=-1),
         ],
     )
