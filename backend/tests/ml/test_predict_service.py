@@ -92,3 +92,37 @@ async def test_predict_race_stale_fallback():
 
     assert len(result) > 0
     assert result[0].model_versions.get("status") == "stale"
+
+
+@pytest.mark.asyncio
+async def test_get_win_rate_returns_zero_for_unknown():
+    """Unknown jockey with no history should return 0.0."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.ml.predict.service import _get_win_rate
+    import datetime
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar.return_value = None
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    rate = await _get_win_rate(mock_session, 9999, "jockey_id",
+                               datetime.date(2026, 6, 1))
+    assert rate == 0.0
+
+
+@pytest.mark.asyncio
+async def test_get_win_rate_returns_float():
+    """A jockey with a win should return a positive float."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.ml.predict.service import _get_win_rate
+    import datetime
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar.return_value = 0.15
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    rate = await _get_win_rate(mock_session, 1, "jockey_id",
+                               datetime.date(2026, 6, 1))
+    assert abs(rate - 0.15) < 1e-9

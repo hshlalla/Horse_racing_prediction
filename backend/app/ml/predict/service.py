@@ -229,6 +229,42 @@ async def _get_horse_history(
     }
 
 
+async def _get_win_rate(
+    session: AsyncSession,
+    entity_id: int,
+    entity_col: str,
+    as_of_date: datetime.date,
+) -> float:
+    """
+    Compute historical win rate for a jockey or trainer as of a given date.
+    entity_col must be 'jockey_id' or 'trainer_id'.
+    Returns 0.0 if no history.
+    """
+    from sqlalchemy import func, case
+
+    stmt = (
+        select(
+            func.avg(case((RaceResult.finish_position == 1, 1), else_=0))
+        )
+        .select_from(RaceResult)
+        .join(Race, RaceResult.race_id == Race.id)
+        .join(
+            RaceEntry,
+            (RaceEntry.race_id == RaceResult.race_id)
+            & (RaceEntry.horse_id == RaceResult.horse_id),
+        )
+        .where(Race.race_date < as_of_date)
+    )
+    if entity_col == "jockey_id":
+        stmt = stmt.where(RaceEntry.jockey_id == entity_id)
+    else:
+        stmt = stmt.where(RaceEntry.trainer_id == entity_id)
+
+    result = await session.execute(stmt)
+    rate = result.scalar()
+    return float(rate) if rate is not None else 0.0
+
+
 # ---------------------------------------------------------------------------
 # Stale-cache helpers
 # ---------------------------------------------------------------------------
@@ -417,6 +453,17 @@ async def _predict_race_impl(
 
         history = await _get_horse_history(session, entry.horse_id, today)
 
+        jockey_win_rate = (
+            await _get_win_rate(session, entry.jockey_id, "jockey_id", today)
+            if entry.jockey_id
+            else 0.0
+        )
+        trainer_win_rate = (
+            await _get_win_rate(session, entry.trainer_id, "trainer_id", today)
+            if entry.trainer_id
+            else 0.0
+        )
+
         row: dict = {
             "jockey_id": entry.jockey_id or 0,
             "trainer_id": entry.trainer_id or 0,
@@ -433,9 +480,9 @@ async def _predict_race_impl(
             "weather": race.weather or "맑음",
             "days_since_last_race": history["days_since_last_race"],
             "horse_win_rate": history["horse_win_rate"],
-            "jockey_win_rate": 0.0,
-            "trainer_win_rate": 0.0,
-            "sire_win_rate": 0.0,
+            "jockey_win_rate": jockey_win_rate,
+            "trainer_win_rate": trainer_win_rate,
+            "sire_win_rate": 0.0,   # requires pedigree join; kept at 0
             "past_avg_s1f_time": history["past_avg_s1f_time"],
             "past_avg_g3f_time": history["past_avg_g3f_time"],
             "humidity": race.humidity or 50,
@@ -469,12 +516,17 @@ async def _predict_race_impl(
         probs = apply_calibration(probs, model.calibrator)
 
     # ------------------------------------------------------------------
-    # 7. Cold-start blending (DISABLED FOR POC)
+    # 7. Cold-start blending
     # ------------------------------------------------------------------
-    # In production, we blend horses with < 3 starts toward the field average.
-    # However, since the POC DB is small, all horses look like "debut" horses.
-    # We disable this to show the raw Ensemble predictions.
-    blended = np.array(probs)
+    # Horses with fewer than 3 lifetime starts are blended toward the
+    # field-average probability to avoid over-confident predictions.
+    field_avg = 1.0 / len(probs)
+    blended = np.array([
+        min(row["_n_starts"] / 3.0, 1.0) * probs[i]
+        + (1 - min(row["_n_starts"] / 3.0, 1.0)) * field_avg
+        for i, row in enumerate(rows)
+    ])
+    blended = blended / blended.sum()
 
     # ------------------------------------------------------------------
     # 8. Build HorsePrediction list
