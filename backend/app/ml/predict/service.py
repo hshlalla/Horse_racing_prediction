@@ -64,6 +64,10 @@ FEATURES = [
     "past_avg_start_rank",
     "past_avg_mid_rank",
     "past_avg_finish_rank",
+    "surface",
+    "grade",
+    "body_weight_delta_kg",
+    "morning_odds_rank",
 ]
 
 # ---------------------------------------------------------------------------
@@ -265,6 +269,25 @@ async def _get_win_rate(
     return float(rate) if rate is not None else 0.0
 
 
+async def _get_prev_body_weight(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> float:
+    """Return the horse's body weight from its most recent race before as_of_date."""
+    stmt = (
+        select(RaceEntry.body_weight_kg)
+        .join(Race, RaceEntry.race_id == Race.id)
+        .where(RaceEntry.horse_id == horse_id)
+        .where(Race.race_date < as_of_date)
+        .order_by(Race.race_date.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    weight = result.scalar()
+    return float(weight) if weight else 500.0
+
+
 # ---------------------------------------------------------------------------
 # Stale-cache helpers
 # ---------------------------------------------------------------------------
@@ -464,6 +487,22 @@ async def _predict_race_impl(
             else 0.0
         )
 
+        from app.db.models.crawl import Pedigree
+        ped_res = await session.execute(
+            select(Pedigree.sire_id).where(Pedigree.horse_id == entry.horse_id)
+        )
+        sire_id = ped_res.scalar_one_or_none()
+        sire_win_rate = (
+            await _get_win_rate(session, sire_id, "sire_id", today)
+            if sire_id
+            else 0.0
+        )
+
+        prev_body_weight = await _get_prev_body_weight(
+            session, entry.horse_id, today
+        )
+        body_weight_delta = (entry.body_weight_kg or 500.0) - prev_body_weight
+
         row: dict = {
             "jockey_id": entry.jockey_id or 0,
             "trainer_id": entry.trainer_id or 0,
@@ -482,24 +521,35 @@ async def _predict_race_impl(
             "horse_win_rate": history["horse_win_rate"],
             "jockey_win_rate": jockey_win_rate,
             "trainer_win_rate": trainer_win_rate,
-            "sire_win_rate": 0.0,   # requires pedigree join; kept at 0
+            "sire_win_rate": sire_win_rate,
             "past_avg_s1f_time": history["past_avg_s1f_time"],
             "past_avg_g3f_time": history["past_avg_g3f_time"],
             "humidity": race.humidity or 50,
             "past_avg_start_rank": history["past_avg_start_rank"],
             "past_avg_mid_rank": history["past_avg_mid_rank"],
             "past_avg_finish_rank": history["past_avg_finish_rank"],
+            "surface": race.surface or "Dirt",
+            "grade": race.grade or "unknown",
+            "body_weight_delta_kg": body_weight_delta,
+            "morning_odds_rank": 0,   # placeholder — filled after the loop
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
         }
         rows.append(row)
 
+    # Compute morning_odds_rank across all horses in this race
+    all_odds = [r["morning_odds"] for r in rows]
+    sorted_odds = sorted(set(all_odds))
+    odds_rank_map = {v: i + 1 for i, v in enumerate(sorted_odds)}
+    for r in rows:
+        r["morning_odds_rank"] = odds_rank_map[r["morning_odds"]]
+
     # ------------------------------------------------------------------
     # 6. Model inference
     # ------------------------------------------------------------------
     pred_df = pd.DataFrame(rows)
-    for col in ("horse_sex", "track", "track_condition", "weather"):
+    for col in ("horse_sex", "track", "track_condition", "weather", "surface", "grade"):
         pred_df[col] = pred_df[col].astype("category")
 
     raw_scores = model.predict(pred_df[FEATURES])

@@ -11,7 +11,7 @@ def train_catboost(train_df: pd.DataFrame, val_df: pd.DataFrame,
     """
     from catboost import CatBoostRanker, Pool
 
-    cat_features = ['jockey_id', 'trainer_id', 'horse_sex', 'track', 'track_condition', 'weather']
+    cat_features = ['jockey_id', 'trainer_id', 'horse_sex', 'track', 'track_condition', 'weather', 'surface', 'grade']
     # Only include cat features that are actually in the feature list
     cat_features_in_use = [c for c in cat_features if c in features]
 
@@ -46,14 +46,14 @@ def train_catboost(train_df: pd.DataFrame, val_df: pd.DataFrame,
     )
 
     model = CatBoostRanker(
-        iterations=500,
-        learning_rate=0.05,
-        depth=6,
+        iterations=2000,
+        learning_rate=0.03,
+        depth=8,
         loss_function='YetiRank',
         eval_metric='NDCG',
         random_seed=42,
         od_type='Iter',
-        od_wait=50,
+        od_wait=100,
         verbose=0,  # suppress output in production
     )
     model.fit(train_pool, eval_set=val_pool)

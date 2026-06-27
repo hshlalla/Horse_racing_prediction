@@ -5,11 +5,12 @@ import os
 
 FEATURES = [
     'jockey_id', 'trainer_id', 'program_number', 'distance_m', 'field_size',
-    'carry_weight_kg', 'body_weight_kg', 'morning_odds', 'horse_age', 'horse_sex',
+    'carry_weight_kg', 'body_weight_kg', 'horse_age', 'horse_sex',
     'track', 'track_condition', 'weather', 'days_since_last_race',
     'horse_win_rate', 'jockey_win_rate', 'trainer_win_rate', 'sire_win_rate',
     'past_avg_s1f_time', 'past_avg_g3f_time',
-    'humidity', 'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank'
+    'humidity', 'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank',
+    'surface', 'grade', 'body_weight_delta_kg'
 ]
 TARGET = 'relevance'
 
@@ -23,6 +24,8 @@ SELECT
     r.track_condition,
     r.weather,
     r.humidity,
+    r.surface,
+    r.grade,
     e.horse_id,
     e.jockey_id,
     e.trainer_id,
@@ -61,6 +64,8 @@ def _apply_features(df: pd.DataFrame):
     df['track'] = df['track'].astype('category')
     df['track_condition'] = df['track_condition'].fillna('건조').astype('category')
     df['weather'] = df['weather'].fillna('맑음').astype('category')
+    df['surface'] = df['surface'].fillna('Dirt').astype('category')
+    df['grade'] = df['grade'].fillna('unknown').astype('category')
     df['humidity'] = df['humidity'].fillna(5.0).astype(float)
     df['body_weight_kg'] = df['body_weight_kg'].fillna(500.0)
     df['horse_age'] = df['horse_age'].fillna(3).astype(int)
@@ -143,6 +148,23 @@ def _apply_features(df: pd.DataFrame):
         lambda x: 3 if x == 1 else (2 if x == 2 else (1 if x == 3 else 0))
     )
     df.sort_values(['race_date', 'race_id'], inplace=True)
+
+    # Body weight delta (horse weight change from previous race)
+    df.sort_values(['horse_id', 'race_date', 'race_id'], inplace=True)
+    df['body_weight_delta_kg'] = (
+        df.groupby('horse_id')['body_weight_kg']
+        .transform(lambda x: x - x.shift(1))
+        .fillna(0.0)
+    )
+
+    # Morning odds rank within race (1 = favourite = lowest odds)
+    df['morning_odds_rank'] = (
+        df.groupby('race_id')['morning_odds']
+        .rank(method='min', ascending=True)
+        .astype(int)
+    )
+
+    df.sort_values(['race_date', 'race_id'], inplace=True)
     df['finish_time_s'] = df['finish_time_s'].fillna(999.0)
     return df
 
@@ -159,6 +181,7 @@ def load_dataset_pg(db_url: str):
         db_url
         .replace("postgresql+asyncpg://", "postgresql+psycopg2://")
         .replace("postgresql://", "postgresql+psycopg2://")
+        .replace("sqlite+aiosqlite://", "sqlite://")
     )
     engine = create_engine(sync_url)
     with engine.connect() as conn:
@@ -167,18 +190,23 @@ def load_dataset_pg(db_url: str):
 
     df = _apply_features(df)
 
-    if df['race_date'].min() >= pd.to_datetime('2026-01-01'):
-        n = len(df)
-        train_df = df.iloc[:int(n*0.7)].copy()
-        val_df = df.iloc[int(n*0.7):int(n*0.85)].copy()
-        test_df = df.iloc[int(n*0.85):].copy()
-    else:
-        train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
-        val_mask = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
-        test_mask = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
-        train_df = df[train_mask].copy()
-        val_df = df[val_mask].copy()
-        test_df = df[test_mask].copy()
+    # Use a dynamic chronological split: 70% Train, 15% Val, 15% Test based on unique races
+    unique_races = df[['race_date', 'race_id']].drop_duplicates().sort_values(['race_date', 'race_id'])
+    n_races = len(unique_races)
+    
+    if n_races < 100:
+        return df.copy(), df.copy(), df.copy(), FEATURES, TARGET
+
+    train_idx = int(n_races * 0.70)
+    val_idx = int(n_races * 0.85)
+
+    train_races = unique_races.iloc[:train_idx]
+    val_races = unique_races.iloc[train_idx:val_idx]
+    test_races = unique_races.iloc[val_idx:]
+
+    train_df = df.merge(train_races, on=['race_date', 'race_id']).copy()
+    val_df = df.merge(val_races, on=['race_date', 'race_id']).copy()
+    test_df = df.merge(test_races, on=['race_date', 'race_id']).copy()
 
     return (
         train_df,
@@ -200,18 +228,23 @@ def load_dataset(db_path: str = "test_dod.db"):
     df = _apply_features(df)
     
     # Split Dataset
-    if df['race_date'].min() >= pd.to_datetime('2026-01-01'):
-        n = len(df)
-        train_df = df.iloc[:int(n*0.7)].copy()
-        val_df = df.iloc[int(n*0.7):int(n*0.85)].copy()
-        test_df = df.iloc[int(n*0.85):].copy()
-    else:
-        train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
-        val_mask = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
-        test_mask = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
-        train_df = df[train_mask].copy()
-        val_df = df[val_mask].copy()
-        test_df = df[test_mask].copy()
+    # Use a dynamic chronological split: 70% Train, 15% Val, 15% Test based on unique races
+    unique_races = df[['race_date', 'race_id']].drop_duplicates().sort_values(['race_date', 'race_id'])
+    n_races = len(unique_races)
+    
+    if n_races < 100:
+        return df.copy(), df.copy(), df.copy(), FEATURES, TARGET
+
+    train_idx = int(n_races * 0.70)
+    val_idx = int(n_races * 0.85)
+
+    train_races = unique_races.iloc[:train_idx]
+    val_races = unique_races.iloc[train_idx:val_idx]
+    test_races = unique_races.iloc[val_idx:]
+
+    train_df = df.merge(train_races, on=['race_date', 'race_id']).copy()
+    val_df = df.merge(val_races, on=['race_date', 'race_id']).copy()
+    test_df = df.merge(test_races, on=['race_date', 'race_id']).copy()
     
     return train_df, val_df, test_df, FEATURES, TARGET
 
