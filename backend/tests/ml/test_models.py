@@ -46,3 +46,18 @@ def test_train_catboost_returns_predictions(small_dataset):
     preds = model.predict(val[features])
     assert len(preds) == len(val)
     assert not np.any(np.isnan(preds))
+
+
+def test_train_lgbm_is_ranker(small_dataset):
+    """LGBMRanker must produce per-horse scores, one per row."""
+    from app.ml.train.models.lgbm_binary import train_lgbm
+    import numpy as np
+    train, val, features, target = small_dataset
+    # Verify race_id is present (required for group construction)
+    assert 'race_id' in train.columns
+    model = train_lgbm(train, val, features, target)
+    preds = model.predict(val[features])
+    assert len(preds) == len(val)
+    assert not np.any(np.isnan(preds))
+    # Scores must not all be identical (a pointwise model can produce all-same scores)
+    assert preds.std() > 0
