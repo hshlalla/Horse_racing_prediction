@@ -61,3 +61,14 @@ def test_train_lgbm_is_ranker(small_dataset):
     assert not np.any(np.isnan(preds))
     # Scores must not all be identical (a pointwise model can produce all-same scores)
     assert preds.std() > 0
+
+
+def test_kelly_fraction_is_quarter():
+    """Quarter-Kelly (0.25) should be used, not tenth-Kelly (0.1)."""
+    import inspect
+    import app.ml.train.evaluate as ev
+    src = inspect.getsource(ev.evaluate_test_set)
+    assert "kelly_f_win * 0.25" in src
+    assert "kelly_f_place * 0.25" in src
+    assert "kelly_f_win * 0.1" not in src
+    assert "kelly_f_place * 0.1" not in src

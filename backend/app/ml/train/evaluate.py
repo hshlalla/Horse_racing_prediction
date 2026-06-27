@@ -57,8 +57,8 @@ def evaluate_test_set(model, test_df, features):
         q_win = 1.0 - p_win
         kelly_f_win = (p_win * b_win - q_win) / b_win if b_win > 0 else 0
         
-        # Fractional Kelly (10%) to prevent ruin
-        bet_frac_win = max(0, min(0.1, kelly_f_win * 0.1))
+        # Fractional Kelly (25%) to prevent ruin
+        bet_frac_win = max(0, min(0.25, kelly_f_win * 0.25))
         bet_amount_win = roi_win * bet_frac_win
         roi_win -= bet_amount_win
         
@@ -75,7 +75,7 @@ def evaluate_test_set(model, test_df, features):
         q_place = 1.0 - p_place
         kelly_f_place = (p_place * b_place - q_place) / b_place if b_place > 0 else 0
         
-        bet_frac_place = max(0, min(0.1, kelly_f_place * 0.1))
+        bet_frac_place = max(0, min(0.25, kelly_f_place * 0.25))
         bet_amount_place = roi_place * bet_frac_place
         roi_place -= bet_amount_place
         

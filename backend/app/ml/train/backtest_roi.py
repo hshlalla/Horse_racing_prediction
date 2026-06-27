@@ -1,91 +1,118 @@
-import asyncio
-from sqlalchemy import select
-from app.db.session import async_session_factory
-from app.db.models.crawl import Race, RacePrediction, RaceEntry
-from sqlalchemy.orm import selectinload
+"""
+Batch backtest: loads all race data via load_dataset_pg, predicts offline,
+then simulates WIN / QUINELLA / TRIO betting against stored payouts.
 
-async def run_backtest():
-    # 1. Fetch all races with payouts and predictions
+Run:
+    DATABASE_URL=postgresql+psycopg2://... python -m app.ml.train.backtest_roi
+"""
+import asyncio
+import logging
+import os
+
+import numpy as np
+from scipy.special import softmax
+from sqlalchemy import select
+
+from app.db.session import async_session_factory
+from app.db.models.crawl import Race
+
+logger = logging.getLogger(__name__)
+
+
+async def _load_payouts() -> dict[int, dict]:
+    """Return {race_id: payouts_dict} for all races that have payouts."""
     async with async_session_factory() as session:
         result = await session.execute(
-            select(Race)
-            .options(selectinload(Race.entries))
-            .where(Race.payouts.is_not(None))
+            select(Race.id, Race.payouts).where(Race.payouts.is_not(None))
         )
-        races = result.scalars().all()
-        
-        # We need predictions too
-        # To avoid N+1 queries, let's load all predictions for these races
-        # Wait, let's just predict on the fly!
-        from app.ml.predict.service import predict_race
-        
-        preds_by_race = {}
-        for r in races:
-            race_preds = await predict_race(session, r.id)
-            preds_by_race[r.id] = race_preds
-            
-        print(f"Loaded {len(races)} races with payouts and predicted them.")
-        
-        # Strategies:
-        # 1. WIN (단승): Bet top 1 AI pick. Payout if Top 1 wins.
-        # 2. QUINELLA (복승): Bet top 2 AI picks as a quinella.
-        # 3. TRIO (삼복승): Bet top 3 AI picks as a trio.
-        
-        investments = {"WIN": 0, "QUINELLA": 0, "TRIO": 0}
-        returns = {"WIN": 0.0, "QUINELLA": 0.0, "TRIO": 0.0}
-        
-        for race in races:
-            race_preds = preds_by_race[race.id]
-            if not race_preds:
-                continue
-                
-            # Map horse_id to program_number
-            horse_to_num = {e.horse_id: e.program_number for e in race.entries}
-            
-            # Sort predictions by win probability descending
-            race_preds.sort(key=lambda x: x.win_probability, reverse=True)
-            
-            if len(race_preds) < 3:
-                continue
-                
-            top1_num = str(horse_to_num.get(race_preds[0].horse_id))
-            top2_nums = {str(horse_to_num.get(p.horse_id)) for p in race_preds[:2]}
-            top3_nums = {str(horse_to_num.get(p.horse_id)) for p in race_preds[:3]}
-            
-            payouts = race.payouts or {}
-            
-            if not payouts:
-                continue
-                
-            # 1. WIN Strategy (bet 1000 won on top 1)
-            investments["WIN"] += 1000
-            for p in payouts.get("win", []):
-                if p["numbers"] == top1_num:
-                    returns["WIN"] += 1000 * p["odds"]
-                    
-            # 2. QUINELLA Strategy (bet 1000 won on top 2 combination)
-            investments["QUINELLA"] += 1000
-            for p in payouts.get("quinella", []):
-                win_comb = set(p["numbers"].split("-"))
-                if win_comb == top2_nums:
-                    returns["QUINELLA"] += 1000 * p["odds"]
-                    
-            # 3. TRIO Strategy (bet 1000 won on top 3 combination)
-            investments["TRIO"] += 1000
-            for p in payouts.get("trio", []):
-                win_comb = set(p["numbers"].split("-"))
-                if win_comb == top3_nums:
-                    returns["TRIO"] += 1000 * p["odds"]
-                    
-        print("\n--- Backtest Results ---")
-        for strategy in ["WIN", "QUINELLA", "TRIO"]:
-            inv = investments[strategy]
-            ret = returns[strategy]
-            roi = ((ret - inv) / inv * 100) if inv > 0 else 0
-            print(f"Strategy {strategy}:")
-            print(f"  Investment: {inv:,.0f} KRW")
-            print(f"  Return:     {ret:,.0f} KRW")
-            print(f"  ROI:        {roi:+.2f}%")
+        return {row.id: row.payouts for row in result.all() if row.payouts}
+
+
+async def run_backtest() -> None:
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        logger.error("DATABASE_URL not set — cannot run backtest")
+        return
+
+    from app.ml.train.dataset import load_dataset_pg, FEATURES
+    from app.ml.train.promote import load_production_model
+
+    # 1. Load payouts
+    payouts_by_race = await _load_payouts()
+    if not payouts_by_race:
+        logger.info("No races with payouts found — nothing to backtest")
+        return
+
+    # 2. Load feature matrix from DB in one batch query
+    train_df, val_df, test_df, features, target = load_dataset_pg(db_url)
+    # Use all available data (union of splits) for backtesting
+    import pandas as pd
+    all_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
+    all_df = all_df[all_df["race_id"].isin(payouts_by_race)].copy()
+
+    if all_df.empty:
+        logger.info("No feature rows match races with payouts")
+        return
+
+    # 3. Load production model (use SEOUL as default; falls back gracefully)
+    try:
+        model = load_production_model("SEOUL")
+    except FileNotFoundError:
+        logger.error("No production model found — run training first")
+        return
+
+    # 4. Score all horses in one model call
+    cat_cols = ["horse_sex", "track", "track_condition", "weather"]
+    for c in cat_cols:
+        if c in all_df.columns:
+            all_df[c] = all_df[c].astype("category")
+    all_df["pred_score"] = model.predict(all_df[FEATURES])
+
+    # 5. Per-race betting simulation
+    investments: dict[str, int] = {"WIN": 0, "QUINELLA": 0, "TRIO": 0}
+    returns: dict[str, float] = {"WIN": 0.0, "QUINELLA": 0.0, "TRIO": 0.0}
+
+    for race_id, race_df in all_df.groupby("race_id"):
+        payouts = payouts_by_race.get(race_id, {})
+        if not payouts or len(race_df) < 3:
+            continue
+
+        race_df = race_df.copy()
+        race_df["prob"] = softmax(race_df["pred_score"].values)
+        race_df = race_df.sort_values("prob", ascending=False)
+
+        top1 = str(int(race_df.iloc[0]["program_number"]))
+        top2 = {str(int(r["program_number"])) for _, r in race_df.head(2).iterrows()}
+        top3 = {str(int(r["program_number"])) for _, r in race_df.head(3).iterrows()}
+
+        # WIN
+        investments["WIN"] += 1000
+        for p in payouts.get("win", []):
+            if p.get("numbers") == top1:
+                returns["WIN"] += 1000 * p["odds"]
+
+        # QUINELLA
+        investments["QUINELLA"] += 1000
+        for p in payouts.get("quinella", []):
+            if set(p.get("numbers", "").split("-")) == top2:
+                returns["QUINELLA"] += 1000 * p["odds"]
+
+        # TRIO
+        investments["TRIO"] += 1000
+        for p in payouts.get("trio", []):
+            if set(p.get("numbers", "").split("-")) == top3:
+                returns["TRIO"] += 1000 * p["odds"]
+
+    print("\n--- Backtest Results ---")
+    for strategy in ["WIN", "QUINELLA", "TRIO"]:
+        inv = investments[strategy]
+        ret = returns[strategy]
+        roi = ((ret - inv) / inv * 100) if inv > 0 else 0.0
+        print(f"Strategy {strategy}:")
+        print(f"  Investment: {inv:,.0f} KRW")
+        print(f"  Return:     {ret:,.0f} KRW")
+        print(f"  ROI:        {roi:+.2f}%")
+
 
 if __name__ == "__main__":
     asyncio.run(run_backtest())
