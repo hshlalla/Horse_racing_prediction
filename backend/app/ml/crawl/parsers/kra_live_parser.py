@@ -308,17 +308,27 @@ class KRALiveParser:
         """
         Parses chulmaDetailInfoChulmapyo.do to extract horse entries for an upcoming race.
         """
+        import re as _re
         soup = BeautifulSoup(html_content, 'lxml')
         results = []
-        
+
         table = soup.find('div', class_='tableType2')
         if not table:
             return results
-            
+
+        actual_table = table.find('table')
         tbody = table.find('tbody')
         if not tbody:
             return results
-            
+
+        # Find 단승 (morning odds) column index from <th> headers
+        odds_col_idx = -1
+        if actual_table:
+            header_row = actual_table.find('tr')
+            if header_row:
+                headers = [th.get_text(strip=True) for th in header_row.find_all('th')]
+                odds_col_idx = headers.index('단승') if '단승' in headers else -1
+
         for row in tbody.find_all('tr'):
             cols = row.find_all('td')
             if len(cols) >= 10:
@@ -326,43 +336,54 @@ class KRALiveParser:
                     horse_no_str = cols[0].get_text(strip=True)
                     if not horse_no_str.isdigit():
                         continue
-                        
+
                     horse_no = int(horse_no_str)
                     horse_name = cols[1].get_text(strip=True)
                     sex = cols[3].get_text(strip=True)
                     age_str = cols[4].get_text(strip=True)
                     age = int(age_str) if age_str.isdigit() else None
-                    
+
+                    # carry_weight from 부담중량 (col[5])
+                    carry_str = cols[5].get_text(strip=True).replace('*', '')
+                    carry_weight = float(carry_str) if carry_str.replace('.', '', 1).isdigit() else 0.0
+
+                    # body weight — strip delta suffix e.g. "480(-2)" → 480.0
                     weight_str = cols[6].get_text(strip=True)
-                    weight = float(weight_str) if weight_str else 0.0
-                    
+                    bw_match = _re.match(r'(\d+(?:\.\d+)?)', weight_str)
+                    weight = float(bw_match.group(1)) if bw_match else 0.0
+
                     # Jockey name sometimes has "(-3)Name", clean it
                     jockey = cols[8].get_text(strip=True)
                     if ')' in jockey:
                         jockey = jockey.split(')')[-1].strip()
-                        
+
                     trainer = cols[9].get_text(strip=True)
-                    
+
                     # 취소/제외 마필 필터링 (Filter out canceled or excluded horses)
                     if '취소' in horse_name or '제외' in horse_name or '취소' in jockey:
                         logger.info(f"Skipping canceled horse: {horse_name}")
                         continue
-                    
-                    
+
+                    # morning_odds from 단승 column if present
+                    morning_odds = None
+                    if odds_col_idx >= 0 and len(cols) > odds_col_idx:
+                        odds_str = cols[odds_col_idx].get_text(strip=True)
+                        if odds_str.replace('.', '', 1).isdigit():
+                            morning_odds = float(odds_str)
+
                     results.append({
                         "horse_no": horse_no,
                         "horse_name": horse_name,
                         "sex": sex,
                         "age": age,
                         "weight": weight,
+                        "carry_weight": carry_weight,
                         "jockey": jockey,
                         "trainer": trainer,
-                        # Mock odds since it's an upcoming race without real morning odds on this page
-                        "odds_win": 1.0,
-                        "odds_place": 1.0
+                        "morning_odds": morning_odds,
                     })
                 except Exception as e:
                     logger.debug(f"Failed to parse upcoming row: {e}")
                     continue
-                    
+
         return results
