@@ -18,6 +18,8 @@ FEATURES = [
     'jockey_win_rate_delta',  # current jockey win rate - previous jockey win rate
     'recent_workout_time_s',  # most recent 1000m workout time in seconds (lower = faster)
     'recent_workout_rank',    # rank in workout group (lower = better)
+    'injury_count_30d',       # health incidents in 30 days before race
+    'days_since_injury',      # days since most recent health record (999 = never)
 ]
 TARGET = 'relevance'
 
@@ -58,7 +60,9 @@ SELECT
     odds_snap.opening_odds,
     odds_snap.closing_odds,
     wk.time_s AS recent_workout_time_s,
-    wk.rank   AS recent_workout_rank
+    wk.rank   AS recent_workout_rank,
+    hr.injury_count_30d,
+    hr.days_since_injury
 FROM races r
 JOIN race_entries e ON r.id = e.race_id
 JOIN horses h ON e.horse_id = h.id
@@ -87,6 +91,14 @@ LEFT JOIN LATERAL (
     ORDER BY workout_date DESC
     LIMIT 1
 ) wk ON true
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (WHERE record_date >= r.race_date - INTERVAL '30 days') AS injury_count_30d,
+        (r.race_date - MAX(record_date))::int AS days_since_injury
+    FROM health_records
+    WHERE horse_id = e.horse_id
+      AND record_date < r.race_date
+) hr ON true
 ORDER BY r.race_date, r.id
 """
 
@@ -254,6 +266,10 @@ def _apply_features(df: pd.DataFrame):
     # Workout features (NULL = no workout data recorded before this race)
     df['recent_workout_time_s'] = df['recent_workout_time_s'].fillna(70.0)   # slow = unknown
     df['recent_workout_rank'] = df['recent_workout_rank'].fillna(8).astype(int)
+
+    # Health features (NULL = no health records in DB for this horse before this race)
+    df['injury_count_30d'] = df['injury_count_30d'].fillna(0).astype(int)
+    df['days_since_injury'] = df['days_since_injury'].fillna(999).astype(int)
 
     df.sort_values(['race_date', 'race_id'], inplace=True)
     df['finish_time_s'] = df['finish_time_s'].fillna(999.0)

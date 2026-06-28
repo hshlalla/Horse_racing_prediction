@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.crawl import (
-    Horse, InraceTiming, Jockey, Race, RaceEntry, RaceResult, Trainer, WorkoutTime,
+    Horse, HealthRecord, InraceTiming, Jockey, Race, RaceEntry, RaceResult, Trainer, WorkoutTime,
 )
 
 
@@ -179,6 +179,24 @@ async def upsert_inrace_timing(session: AsyncSession, race_id: int, horse_id: in
                 "corner6_rank": sa.literal(corner6_rank),
                 "corner7_rank": sa.literal(corner7_rank),
             },
+        )
+    )
+    await session.execute(stmt)
+
+
+async def upsert_health_record(
+    session: AsyncSession,
+    horse_id: int,
+    record_date: datetime.date,
+    condition: Optional[str] = None,
+    count: int = 1,
+) -> None:
+    stmt = (
+        pg_insert(HealthRecord)
+        .values(horse_id=horse_id, record_date=record_date, condition=condition, count=count)
+        .on_conflict_do_update(
+            index_elements=["horse_id", "record_date", "condition"],
+            set_={"count": sa.literal(count)},
         )
     )
     await session.execute(stmt)

@@ -147,6 +147,18 @@ class WorkoutTime(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
 
+class HealthRecord(Base):
+    __tablename__ = "health_records"
+    __table_args__ = (UniqueConstraint("horse_id", "record_date", "condition"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    horse_id: Mapped[int] = mapped_column(Integer, ForeignKey("horses.id"), nullable=False)
+    record_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    condition: Mapped[Optional[str]] = mapped_column(String(50))
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+
 class Scratching(Base):
     __tablename__ = "scratchings"
     __table_args__ = (UniqueConstraint("race_id", "horse_id"),)

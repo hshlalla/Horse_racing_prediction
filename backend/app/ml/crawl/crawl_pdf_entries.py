@@ -24,7 +24,7 @@ import httpx
 import pdfplumber
 
 from app.db.session import async_session_factory
-from app.ml.crawl.upsert import upsert_horse, upsert_jockey, upsert_trainer, upsert_race, upsert_race_entry, upsert_workout_time
+from app.ml.crawl.upsert import upsert_horse, upsert_jockey, upsert_trainer, upsert_race, upsert_race_entry, upsert_workout_time, upsert_health_record
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,18 @@ AGE_SEX_RE = re.compile(r"^(\d+)(수|암|거)\((\d{6})\)")
 
 # 조교 날짜 헤더: 260521-2R 주행심사 1000 비18%
 WORKOUT_DATE_RE = re.compile(r"(\d{6})[-–](\d+)R\s*(주행심사|실기심사|장해심사|조교|경주)")
+# 건강 이상 기록: YYMMDD + (부위) + 질환명 + N회
+_HEALTH_CONDITIONS = (
+    "근육통|찰과상|각막염|교돌상|복대상|감기|염증|구내염|낭치|피로|부종|골절|타박|열상"
+    "|탈구|마비|파행|출혈|농양|건염|관절염|요통|과호흡|통증|상처|종창|타임상|지절부상"
+    "|피부염|비염|폐렴|위궤양|경련|식욕부진|빈혈"
+)
+HEALTH_RE = re.compile(
+    r"(\d{6})"                  # date YYMMDD
+    r"[가-힣A-Za-z\s]{0,20}?"  # optional body part (lazy)
+    r"(" + _HEALTH_CONDITIONS + r")"  # condition keyword
+    r"(\d+)회"                  # count
+)
 # 조교 파트너 라인: ⑤ 1엠파이어1:05.2 54.0 코지
 # ①–⑮ 원형숫자
 _CIRCLE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
@@ -73,6 +85,25 @@ def _yymmdd_to_date(yymmdd: str) -> Optional[datetime.date]:
         return datetime.date(y, int(yymmdd[2:4]), int(yymmdd[4:6]))
     except Exception:
         return None
+
+
+def _extract_health_records(lines: List[str]) -> List[Dict]:
+    """Extract health incident records from a horse's text block."""
+    combined = "\n".join(lines)
+    results: List[Dict] = []
+    seen: set = set()
+    for m in HEALTH_RE.finditer(combined):
+        d = _yymmdd_to_date(m.group(1))
+        if d is None:
+            continue
+        condition = m.group(2)
+        count = int(m.group(3))
+        key = (d, condition)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({"record_date": d, "condition": condition, "count": count})
+    return results
 
 
 def _extract_workouts(lines: List[str], prog_number: int, horse_name: str) -> List[Dict]:
@@ -171,6 +202,7 @@ def _parse_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
         entry["workout_records"] = _extract_workouts(
             block_lines, entry["program_number"], entry["horse_name"]
         )
+        entry["health_records"] = _extract_health_records(block_lines)
 
     for line in lines:
         m = HORSE_LINE_RE.match(line)
@@ -339,7 +371,17 @@ async def crawl_pdf_entries(
                                 distance_m=wk.get("distance_m", 1000),
                                 time_s=wk.get("time_s"),
                                 rank=wk.get("rank"),
-                                group_size=None,  # group size parsed separately if needed
+                                group_size=None,
+                            )
+
+                        # Save health records
+                        for hr in entry.get("health_records") or []:
+                            await upsert_health_record(
+                                session,
+                                horse_id=horse_id,
+                                record_date=hr["record_date"],
+                                condition=hr["condition"],
+                                count=hr["count"],
                             )
 
                     logger.info("Saved %s %d경주 (%d말)", track_name, rc_no, len(horse_entries))

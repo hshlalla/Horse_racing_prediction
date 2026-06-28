@@ -75,6 +75,8 @@ FEATURES = [
     "jockey_win_rate_delta",
     "recent_workout_time_s",
     "recent_workout_rank",
+    "injury_count_30d",
+    "days_since_injury",
 ]
 
 # ---------------------------------------------------------------------------
@@ -321,6 +323,31 @@ async def _get_recent_workout(
     if row and row[0] is not None:
         return float(row[0]), int(row[1]) if row[1] else 8
     return 70.0, 8  # unknown = slow default
+
+
+async def _get_recent_health(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> tuple:
+    """Return (injury_count_30d, days_since_injury) before as_of_date."""
+    from app.db.models.crawl import HealthRecord
+    from sqlalchemy import func
+    cutoff_30d = as_of_date - datetime.timedelta(days=30)
+    stmt = (
+        select(
+            func.count().filter(HealthRecord.record_date >= cutoff_30d),
+            func.max(HealthRecord.record_date),
+        )
+        .where(HealthRecord.horse_id == horse_id)
+        .where(HealthRecord.record_date < as_of_date)
+    )
+    result = await session.execute(stmt)
+    row = result.first()
+    count = int(row[0]) if row and row[0] else 0
+    max_date = row[1] if row and row[1] else None
+    days = int((as_of_date - max_date).days) if max_date else 999
+    return count, days
 
 
 async def _get_prev_body_weight(
@@ -659,6 +686,9 @@ async def _predict_race_impl(
         recent_workout_time_s, recent_workout_rank = await _get_recent_workout(
             session, entry.horse_id, today
         )
+        injury_count_30d, days_since_injury = await _get_recent_health(
+            session, entry.horse_id, today
+        )
 
         row: dict = {
             "jockey_id": entry.jockey_id or 0,
@@ -696,6 +726,8 @@ async def _predict_race_impl(
             "jockey_win_rate_delta": jockey_win_rate_delta,
             "recent_workout_time_s": recent_workout_time_s,
             "recent_workout_rank": recent_workout_rank,
+            "injury_count_30d": injury_count_30d,
+            "days_since_injury": days_since_injury,
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
@@ -788,6 +820,8 @@ async def _predict_race_impl(
         "jockey_win_rate_delta":("기수 교체 효과", True),  # positive = better jockey came in
         "recent_workout_time_s":("조교 타임", False),       # lower = faster = better
         "recent_workout_rank":  ("조교 순위", False),       # lower = better
+        "injury_count_30d":     ("30일내 이상횟수", False), # lower = better
+        "days_since_injury":    ("이상 후 경과일", True),   # higher = more recovered
     }
 
     def _top_reasons(row: dict, field_rows: list[dict], weights: dict) -> list[dict]:
