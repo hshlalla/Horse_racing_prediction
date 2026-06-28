@@ -20,6 +20,10 @@ FEATURES = [
     'recent_workout_rank',    # rank in workout group (lower = better)
     'injury_count_30d',       # health incidents in 30 days before race
     'days_since_injury',      # days since most recent health record (999 = never)
+    'start_training_passed',      # 1=통과, 0=불합격, -1=미기록
+    'days_since_start_training',  # 마지막 출발훈련 이후 일수 (999=미기록)
+    'swim_count_recent',          # 최근 수영훈련 횟수
+    'recent_workout_count_30d',   # 최근 30일 조교 횟수
 ]
 TARGET = 'relevance'
 
@@ -44,6 +48,8 @@ SELECT
     e.morning_odds,
     h.age as horse_age,
     h.sex as horse_sex,
+    h.last_start_training_date,
+    h.last_start_training_passed,
     p.sire_id,
     t.s1f_time,
     t.g3f_time,
@@ -59,10 +65,12 @@ SELECT
     CASE WHEN res.finish_position = 1 THEN 1 ELSE 0 END as is_win,
     odds_snap.opening_odds,
     odds_snap.closing_odds,
-    wk.time_s AS recent_workout_time_s,
-    wk.rank   AS recent_workout_rank,
+    wk.time_s           AS recent_workout_time_s,
+    wk.rank             AS recent_workout_rank,
+    wk.swim_count_recent,
     hr.injury_count_30d,
-    hr.days_since_injury
+    hr.days_since_injury,
+    wk_cnt.recent_workout_count_30d
 FROM races r
 JOIN race_entries e ON r.id = e.race_id
 JOIN horses h ON e.horse_id = h.id
@@ -84,13 +92,20 @@ LEFT JOIN (
     WHERE win_odds IS NOT NULL
 ) odds_snap ON odds_snap.race_id = r.id AND odds_snap.horse_id = e.horse_id
 LEFT JOIN LATERAL (
-    SELECT time_s, rank
+    SELECT time_s, rank, swim_count_recent
     FROM workout_times
     WHERE horse_id = e.horse_id
       AND workout_date < r.race_date
     ORDER BY workout_date DESC
     LIMIT 1
 ) wk ON true
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS recent_workout_count_30d
+    FROM workout_times
+    WHERE horse_id = e.horse_id
+      AND workout_date >= r.race_date - INTERVAL '30 days'
+      AND workout_date < r.race_date
+) wk_cnt ON true
 LEFT JOIN LATERAL (
     SELECT
         COUNT(*) FILTER (WHERE record_date >= r.race_date - INTERVAL '30 days') AS injury_count_30d,
@@ -266,6 +281,27 @@ def _apply_features(df: pd.DataFrame):
     # Workout features (NULL = no workout data recorded before this race)
     df['recent_workout_time_s'] = df['recent_workout_time_s'].fillna(70.0)   # slow = unknown
     df['recent_workout_rank'] = df['recent_workout_rank'].fillna(8).astype(int)
+    df['swim_count_recent'] = df['swim_count_recent'].fillna(0).astype(int)
+    df['recent_workout_count_30d'] = df['recent_workout_count_30d'].fillna(0).astype(int)
+
+    # Start training features
+    df['start_training_passed'] = (
+        df['last_start_training_passed']
+        .map({True: 1, False: 0})
+        .fillna(-1)
+        .astype(int)
+    )
+    if 'last_start_training_date' in df.columns:
+        df['last_start_training_date'] = pd.to_datetime(df['last_start_training_date'])
+        df['days_since_start_training'] = (
+            (df['race_date'] - df['last_start_training_date'])
+            .dt.days
+            .fillna(999)
+            .clip(upper=999)
+            .astype(int)
+        )
+    else:
+        df['days_since_start_training'] = 999
 
     # Health features (NULL = no health records in DB for this horse before this race)
     df['injury_count_30d'] = df['injury_count_30d'].fillna(0).astype(int)
@@ -297,27 +333,33 @@ def load_dataset_pg(db_url: str):
 
     df = _apply_features(df)
 
-    train_mask = (df['race_date'] >= '2021-01-01') & (df['race_date'] <= '2024-12-31')
-    val_mask   = (df['race_date'] >= '2025-01-01') & (df['race_date'] <= '2025-12-31')
-    test_mask  = (df['race_date'] >= '2026-01-01') & (df['race_date'] <= '2026-12-31')
+    # Dynamic cutoff: val = most recent 6 months, train = everything before that.
+    # This ensures the latest data always trains the model regardless of the current year.
+    today = pd.Timestamp.today().normalize()
+    val_start = today - pd.DateOffset(months=6)
+    train_mask = df['race_date'] < val_start
+    val_mask   = df['race_date'] >= val_start
     train_df = df[train_mask].copy()
     val_df   = df[val_mask].copy()
-    test_df  = df[test_mask].copy()
+    test_df  = pd.DataFrame(columns=df.columns)   # not used in production pipeline
 
-    # Fall back to fractional split when val is empty (e.g. partial crawl with no 2025 data)
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        "Dataset split: train < %s  val >= %s  (train=%d val=%d)",
+        val_start.date(), val_start.date(), len(train_df), len(val_df),
+    )
+
+    # Fall back to fractional split when val is too small
     if len(val_df) < 50:
-        dates = df['race_id'].map(df.groupby('race_id')['race_date'].first())
         unique_races = df[['race_id','race_date']].drop_duplicates().sort_values('race_date')
         n_races = len(unique_races)
-        cut70 = unique_races.iloc[int(n_races * 0.70)]['race_date']
         cut85 = unique_races.iloc[int(n_races * 0.85)]['race_date']
-        train_df = df[df['race_date'] <  cut70].copy()
-        val_df   = df[(df['race_date'] >= cut70) & (df['race_date'] < cut85)].copy()
-        test_df  = df[df['race_date'] >= cut85].copy()
-        import logging
-        logging.getLogger(__name__).warning(
-            "Val set too small — using date-quantile split: train<%.10s val<%.10s test>=%.10s",
-            cut70, cut85, cut85,
+        train_df = df[df['race_date'] <  cut85].copy()
+        val_df   = df[df['race_date'] >= cut85].copy()
+        test_df  = pd.DataFrame(columns=df.columns)
+        _logging.getLogger(__name__).warning(
+            "Val set too small — using 85%% quantile split: train<%.10s val>=%.10s",
+            cut85, cut85,
         )
 
     return (
