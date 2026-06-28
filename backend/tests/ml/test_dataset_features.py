@@ -40,6 +40,17 @@ def raw_df():
         "finish_position":[1, 2, 2, 1],
         "finish_time_s": [72.0, 72.5, 84.0, 83.5],
         "is_win":        [1, 0, 0, 1],
+        # Workout columns (NULL = no data recorded)
+        "recent_workout_time_s":  [65.0, None, 64.0, None],
+        "recent_workout_rank":    [1, None, 2, None],
+        "swim_count_recent":      [0, None, 1, None],
+        "recent_workout_count_30d": [2, 0, 3, 0],
+        # Health columns
+        "injury_count_30d":  [0, 0, 0, 0],
+        "days_since_injury": [None, None, None, None],
+        # Start training columns
+        "last_start_training_passed": [True, None, True, None],
+        "last_start_training_date":   pd.to_datetime([None, None, None, None]),
     })
 
 
