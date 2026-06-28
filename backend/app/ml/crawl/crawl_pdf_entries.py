@@ -61,6 +61,10 @@ HEALTH_RE = re.compile(
     r"(" + _HEALTH_CONDITIONS + r")"  # condition keyword
     r"(\d+)회"                  # count
 )
+# 출발훈련: 210106(승,양호) — 승/합격 = passed, 불합격/불량 = failed
+START_TRAIN_RE = re.compile(r"출발훈련:(\d{6})\(([^)]+)\)")
+# 수영: N회 N바퀴
+SWIM_RE = re.compile(r"수영\s*:\s*(\d+)회")
 # 조교 파트너 라인: ⑤ 1엠파이어1:05.2 54.0 코지
 # ①–⑮ 원형숫자
 _CIRCLE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
@@ -147,6 +151,28 @@ def _extract_workouts(lines: List[str], prog_number: int, horse_name: str) -> Li
     return results
 
 
+def _extract_start_training(lines: List[str]) -> Optional[Dict]:
+    """출발훈련 최근 결과 추출. passed=True(승/합격), False(불합격/불량)."""
+    combined = "\n".join(lines)
+    m = START_TRAIN_RE.search(combined)
+    if not m:
+        return None
+    result_str = m.group(2)
+    # Check failure keywords first (불합격 contains 합격, so order matters)
+    if "불합격" in result_str or "불량" in result_str:
+        passed = False
+    else:
+        passed = "승" in result_str or "합격" in result_str
+    return {"date": m.group(1), "passed": passed}
+
+
+def _extract_swim(lines: List[str]) -> int:
+    """수영 훈련 횟수 추출. 없으면 0."""
+    combined = "\n".join(lines)
+    m = SWIM_RE.search(combined)
+    return int(m.group(1)) if m else 0
+
+
 def _clean_name(name: str) -> str:
     """Remove spaces inserted by PDF renderer between Korean characters."""
     return re.sub(r"\s+", "", name)
@@ -168,6 +194,81 @@ def _extract_distance(text: str) -> Optional[int]:
     for d_str in re.findall(r"\b(1000|1200|1300|1400|1600|1700|1800|2000|2300|900|1100|1110)\b", text):
         return int(d_str)
     return None
+
+
+# 출전표 형식: 마번+마명이 붙어있는 줄 (예: "3아이언머스킷", "10인디라이트")
+ENTRY_HORSE_LINE_RE = re.compile(r"^(\d{1,2})([가-힣A-Za-z·]{2,15})\s*$")
+
+
+def _parse_entry_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
+    """
+    출전표 형식 PDF 파서 (마번+마명 붙어있는 형식, 2021~2022년 게시판 파일).
+    건강기록·조교시간만 추출한다 (race 연결 없이 horse 단위).
+    pdfminer 사용 — pdfplumber와 달리 이 형식에서 줄 구분이 정확함.
+    """
+    import io as _io
+    import pdfminer.high_level as _pdfminer
+    full_text = _pdfminer.extract_text(_io.BytesIO(pdf_bytes))
+
+    lines = full_text.splitlines()
+    entries: List[Dict] = []
+    current: Optional[Dict] = None
+    current_lines: List[str] = []
+
+    def _finalize(entry: Dict, block_lines: List[str]) -> None:
+        entry["workout_records"] = _extract_workouts(
+            block_lines, entry["program_number"], entry["horse_name"]
+        )
+        entry["health_records"] = _extract_health_records(block_lines)
+        entry["start_training"] = _extract_start_training(block_lines)
+        entry["swim_count"] = _extract_swim(block_lines)
+
+    for line in lines:
+        m = ENTRY_HORSE_LINE_RE.match(line.strip())
+        if m:
+            if current:
+                _finalize(current, current_lines)
+                entries.append(current)
+            prog = int(m.group(1))
+            name = _clean_name(m.group(2))
+            current = {
+                "program_number": prog,
+                "horse_name": name,
+                "carry_weight_kg": None,
+                "body_weight_kg": None,
+                "jockey_name": None,
+                "trainer_name": None,
+                "horse_age": None,
+                "horse_sex": None,
+                "distance_m": None,
+                "grade": None,
+                "workout_records": [],
+            }
+            current_lines = [line]
+            continue
+
+        if current is None:
+            continue
+
+        current_lines.append(line)
+
+        if not current["horse_age"]:
+            am = AGE_SEX_RE.match(line.strip())
+            if am:
+                current["horse_age"] = int(am.group(1))
+                sex_map = {"수": "M", "암": "F", "거": "G"}
+                current["horse_sex"] = sex_map.get(am.group(2), "M")
+
+        if not current["trainer_name"]:
+            tm = TRAINER_RE.search(line)
+            if tm:
+                current["trainer_name"] = tm.group(2)
+
+    if current:
+        _finalize(current, current_lines)
+        entries.append(current)
+
+    return entries
 
 
 def _parse_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
@@ -203,6 +304,8 @@ def _parse_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
             block_lines, entry["program_number"], entry["horse_name"]
         )
         entry["health_records"] = _extract_health_records(block_lines)
+        entry["start_training"] = _extract_start_training(block_lines)
+        entry["swim_count"] = _extract_swim(block_lines)
 
     for line in lines:
         m = HORSE_LINE_RE.match(line)
