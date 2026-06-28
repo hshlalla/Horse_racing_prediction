@@ -62,3 +62,8 @@ export async function retryDate(track: string, date: string): Promise<RetryResul
   const res = await apiClient.post("/admin/data/retry", { track, date });
   return res.data;
 }
+
+export async function updateDate(date?: string): Promise<{ ok: boolean; message: string }> {
+  const res = await apiClient.post("/admin/update-date", date ? { date } : {});
+  return res.data;
+}

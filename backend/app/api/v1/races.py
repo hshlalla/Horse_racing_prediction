@@ -20,6 +20,7 @@ class RaceListResponseItem(BaseModel):
     surface: str
     post_time: Optional[datetime.datetime]
     field_size: Optional[int]
+    completed: bool = False
 
 class RaceListResponse(BaseModel):
     items: List[RaceListResponseItem]
@@ -60,13 +61,30 @@ async def list_races(
     track: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
+    from sqlalchemy import select, func
+    from app.db.models.crawl import Race, RaceResult
+
     races = await race_service.get_races_by_date(db, date, track)
+    if not races:
+        return RaceListResponse(items=[])
+
+    # 결과 있는 race_id 집합을 한 번에 조회
+    race_ids = [r.id for r in races]
+    res = await db.execute(
+        select(RaceResult.race_id)
+        .where(RaceResult.race_id.in_(race_ids))
+        .where(RaceResult.finish_position.isnot(None))
+        .distinct()
+    )
+    completed_ids = {row[0] for row in res.all()}
+
     items = []
     for r in races:
         items.append(RaceListResponseItem(
             id=r.id, track=r.track, race_date=r.race_date, race_number=r.race_number,
             race_name=r.race_name, distance_m=r.distance_m, surface=r.surface,
-            post_time=r.post_time, field_size=r.field_size
+            post_time=r.post_time, field_size=r.field_size,
+            completed=r.id in completed_ids,
         ))
     return RaceListResponse(items=items)
 

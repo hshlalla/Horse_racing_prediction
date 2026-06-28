@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDataStatus,
   retryDate,
+  updateDate,
 } from "../../api/admin";
 import type { CrawlFailureInfo, CrawlStateInfo } from "../../api/admin";
 
@@ -67,6 +68,16 @@ function FailureRow({
 export default function DataManagementPage() {
   const queryClient = useQueryClient();
   const [retryingId, setRetryingId] = useState<number | null>(null);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+
+  const updateMutation = useMutation({
+    mutationFn: (date?: string) => updateDate(date),
+    onSuccess: (data) => {
+      setUpdateMsg(data.message);
+      queryClient.invalidateQueries({ queryKey: ["admin", "data", "status"] });
+      setTimeout(() => setUpdateMsg(null), 5000);
+    },
+  });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["admin", "data", "status"],
@@ -105,6 +116,42 @@ export default function DataManagementPage() {
   return (
     <div className="max-w-2xl mx-auto min-h-screen bg-slate-950 text-slate-200 p-4">
       <h1 className="text-2xl font-bold text-slate-100 mb-6">데이터 관리</h1>
+
+      {/* 수동 데이터 업데이트 */}
+      <section className="mb-6">
+        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">
+          데이터 업데이트
+        </h2>
+        <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+          <p className="text-xs text-slate-500">
+            결과 미반영 경주가 있을 때 수동으로 크롤합니다. 배당·결과·예측이 함께 갱신됩니다.
+          </p>
+          <div className="flex gap-3 flex-wrap">
+            <button
+              onClick={() => updateMutation.mutate(undefined)}
+              disabled={updateMutation.isPending}
+              className="flex items-center gap-2 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 rounded-xl px-4 py-2 text-sm font-medium hover:bg-indigo-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {updateMutation.isPending ? "업데이트 중..." : "오늘 데이터 업데이트"}
+            </button>
+            <button
+              onClick={() => {
+                const d = prompt("날짜 입력 (YYYY-MM-DD)");
+                if (d) updateMutation.mutate(d);
+              }}
+              disabled={updateMutation.isPending}
+              className="flex items-center gap-2 bg-slate-700/60 border border-white/10 text-slate-300 rounded-xl px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              특정 날짜 업데이트
+            </button>
+          </div>
+          {updateMsg && (
+            <div className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+              {updateMsg}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* DB Summary */}
       <section className="mb-6">

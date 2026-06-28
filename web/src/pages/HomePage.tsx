@@ -17,7 +17,9 @@ const TRACK_SECTION: Record<string, string> = {
   JEJU: "border-amber-500/20",
 };
 
-function getRaceStatus(postTime: string | null | undefined) {
+function getRaceStatus(postTime: string | null | undefined, completed?: boolean) {
+  // 결과가 DB에 있으면 무조건 완료
+  if (completed) return { label: "완료", cls: "bg-white/5 text-slate-500 border-white/10" };
   if (!postTime) return null;
   const now = new Date();
   const start = parseRaceTime(postTime);
@@ -89,7 +91,7 @@ export default function HomePage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {grouped[track].map((race: any) => {
-                  const status = getRaceStatus(race.post_time);
+                  const status = getRaceStatus(race.post_time, race.completed);
                   return (
                     <div
                       key={race.id}

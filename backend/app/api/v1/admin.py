@@ -206,3 +206,24 @@ async def crawl_race_entries(req: CrawlEntriesRequest):
         "tracks": tracks,
         "message": "Entry crawl started in background",
     }
+
+
+class UpdateDateRequest(BaseModel):
+    date: Optional[datetime.date] = None  # None = 오늘
+
+
+@router.post("/update-date")
+async def update_date(req: UpdateDateRequest = UpdateDateRequest()):
+    """특정 날짜의 결과 + 배당을 즉시 크롤합니다. 백그라운드 실행."""
+    target = req.date or datetime.date.today()
+
+    async def _run():
+        try:
+            from app.ml.crawl.pipeline import run_crawl
+            result = await run_crawl(start_date=target, end_date=target)
+            logger.info("update_date done: %s → %s", target, result)
+        except Exception as exc:
+            logger.error("update_date failed: %s → %s", target, exc)
+
+    asyncio.create_task(_run())
+    return {"ok": True, "date": str(target), "message": f"{target} 데이터 업데이트 시작"}
