@@ -10,15 +10,26 @@ from app.db.models.crawl import (
 )
 
 
-async def upsert_horse(session: AsyncSession, name: str, sex: str,
-                       age: Optional[int] = None) -> int:
+async def upsert_horse(
+    session: AsyncSession,
+    name: str,
+    sex: str,
+    age: Optional[int] = None,
+    last_start_training_date: Optional[datetime.date] = None,
+    last_start_training_passed: Optional[bool] = None,
+) -> int:
+    update_set: dict = {"sex": sa.literal(sex), "age": sa.literal(age)}
+    if last_start_training_date is not None:
+        update_set["last_start_training_date"] = sa.literal(last_start_training_date)
+        update_set["last_start_training_passed"] = sa.literal(last_start_training_passed)
     stmt = (
         pg_insert(Horse)
-        .values(name=name, sex=sex, age=age)
-        .on_conflict_do_update(
-            index_elements=["name"],
-            set_={"sex": sa.literal(sex), "age": sa.literal(age)},
+        .values(
+            name=name, sex=sex, age=age,
+            last_start_training_date=last_start_training_date,
+            last_start_training_passed=last_start_training_passed,
         )
+        .on_conflict_do_update(index_elements=["name"], set_=update_set)
         .returning(Horse.id)
     )
     return (await session.execute(stmt)).scalar_one()
@@ -211,6 +222,8 @@ async def upsert_workout_time(
     time_s: Optional[float] = None,
     rank: Optional[int] = None,
     group_size: Optional[int] = None,
+    start_training_passed: Optional[bool] = None,
+    swim_count_recent: Optional[int] = None,
 ) -> None:
     stmt = (
         pg_insert(WorkoutTime)
@@ -218,6 +231,8 @@ async def upsert_workout_time(
             horse_id=horse_id, workout_date=workout_date,
             workout_type=workout_type, distance_m=distance_m,
             time_s=time_s, rank=rank, group_size=group_size,
+            start_training_passed=start_training_passed,
+            swim_count_recent=swim_count_recent,
         )
         .on_conflict_do_update(
             index_elements=["horse_id", "workout_date", "distance_m"],
@@ -226,6 +241,8 @@ async def upsert_workout_time(
                 "time_s": sa.func.coalesce(sa.literal(time_s), sa.text("workout_times.time_s")),
                 "rank": sa.func.coalesce(sa.literal(rank), sa.text("workout_times.rank")),
                 "group_size": sa.func.coalesce(sa.literal(group_size), sa.text("workout_times.group_size")),
+                "start_training_passed": sa.func.coalesce(sa.literal(start_training_passed), sa.text("workout_times.start_training_passed")),
+                "swim_count_recent": sa.func.coalesce(sa.literal(swim_count_recent), sa.text("workout_times.swim_count_recent")),
             },
         )
     )
