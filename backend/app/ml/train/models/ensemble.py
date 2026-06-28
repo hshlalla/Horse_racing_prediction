@@ -25,6 +25,18 @@ class EnsembleShim:
         self.models = models
         self.weights = weights  # list of floats summing to 1.0
 
+    @property
+    def feature_names_(self) -> list:
+        """Return feature names from the first sub-model (LightGBM or CatBoost)."""
+        for shim in self.models:
+            m = getattr(shim, "m", shim)
+            if hasattr(m, "feature_name_"):
+                fn = m.feature_name_
+                return list(fn() if callable(fn) else fn)  # LightGBM
+            if hasattr(m, "feature_names_"):
+                return list(m.feature_names_)   # CatBoost
+        return []
+
     def predict(self, X: pd.DataFrame, race_ids=None) -> np.ndarray:
         """
         Return weighted blend of sub-model raw scores.

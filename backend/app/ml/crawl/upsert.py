@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.crawl import (
-    Horse, InraceTiming, Jockey, Race, RaceEntry, RaceResult, Trainer,
+    Horse, InraceTiming, Jockey, Race, RaceEntry, RaceResult, Trainer, WorkoutTime,
 )
 
 
@@ -178,6 +178,36 @@ async def upsert_inrace_timing(session: AsyncSession, race_id: int, horse_id: in
                 "corner5_rank": sa.literal(corner5_rank),
                 "corner6_rank": sa.literal(corner6_rank),
                 "corner7_rank": sa.literal(corner7_rank),
+            },
+        )
+    )
+    await session.execute(stmt)
+
+
+async def upsert_workout_time(
+    session: AsyncSession,
+    horse_id: int,
+    workout_date: datetime.date,
+    workout_type: Optional[str] = None,
+    distance_m: int = 1000,
+    time_s: Optional[float] = None,
+    rank: Optional[int] = None,
+    group_size: Optional[int] = None,
+) -> None:
+    stmt = (
+        pg_insert(WorkoutTime)
+        .values(
+            horse_id=horse_id, workout_date=workout_date,
+            workout_type=workout_type, distance_m=distance_m,
+            time_s=time_s, rank=rank, group_size=group_size,
+        )
+        .on_conflict_do_update(
+            index_elements=["horse_id", "workout_date", "distance_m"],
+            set_={
+                "workout_type": sa.literal(workout_type),
+                "time_s": sa.func.coalesce(sa.literal(time_s), sa.text("workout_times.time_s")),
+                "rank": sa.func.coalesce(sa.literal(rank), sa.text("workout_times.rank")),
+                "group_size": sa.func.coalesce(sa.literal(group_size), sa.text("workout_times.group_size")),
             },
         )
     )

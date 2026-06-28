@@ -71,6 +71,10 @@ FEATURES = [
     "distance_win_rate",
     "jockey_horse_win_rate",
     "odds_drift",
+    "jockey_changed",
+    "jockey_win_rate_delta",
+    "recent_workout_time_s",
+    "recent_workout_rank",
 ]
 
 # ---------------------------------------------------------------------------
@@ -296,6 +300,27 @@ async def _get_prev_jockey(
         return None, 0.0
     prev_win_rate = await _get_win_rate(session, prev_jockey_id, "jockey_id", as_of_date)
     return prev_jockey_id, prev_win_rate
+
+
+async def _get_recent_workout(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> tuple:
+    """Return (time_s, rank) from most recent workout before as_of_date."""
+    from app.db.models.crawl import WorkoutTime
+    stmt = (
+        select(WorkoutTime.time_s, WorkoutTime.rank)
+        .where(WorkoutTime.horse_id == horse_id)
+        .where(WorkoutTime.workout_date < as_of_date)
+        .order_by(WorkoutTime.workout_date.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    row = result.first()
+    if row and row[0] is not None:
+        return float(row[0]), int(row[1]) if row[1] else 8
+    return 70.0, 8  # unknown = slow default
 
 
 async def _get_prev_body_weight(
@@ -631,6 +656,10 @@ async def _predict_race_impl(
         )
         jockey_win_rate_delta = jockey_win_rate - prev_jockey_win_rate
 
+        recent_workout_time_s, recent_workout_rank = await _get_recent_workout(
+            session, entry.horse_id, today
+        )
+
         row: dict = {
             "jockey_id": entry.jockey_id or 0,
             "trainer_id": entry.trainer_id or 0,
@@ -665,6 +694,8 @@ async def _predict_race_impl(
             "odds_drift": 0.0,   # populated after race from odds_snapshots; 0 at inference
             "jockey_changed": jockey_changed,
             "jockey_win_rate_delta": jockey_win_rate_delta,
+            "recent_workout_time_s": recent_workout_time_s,
+            "recent_workout_rank": recent_workout_rank,
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
@@ -685,7 +716,17 @@ async def _predict_race_impl(
     for col in ("horse_sex", "track", "track_condition", "weather", "surface", "grade"):
         pred_df[col] = pred_df[col].astype("category")
 
-    raw_scores = model.predict(pred_df[FEATURES])
+    # Use only the features the model was actually trained with.
+    # FEATURES may include newer columns not yet in the saved model;
+    # we intersect with the model's known feature list to stay safe.
+    model_feature_names = getattr(model, "feature_names_", None) or getattr(model, "feature_name_", None) or FEATURES
+    model_features = [f for f in FEATURES if f in set(model_feature_names)]
+    # Ensure unknown new features default to 0 in pred_df
+    for f in model_features:
+        if f not in pred_df.columns:
+            pred_df[f] = 0
+
+    raw_scores = model.predict(pred_df[model_features])
 
     # EnsembleShim returns probabilities directly (summing to 1 or close to it)
     if np.isclose(np.sum(raw_scores), 1.0, atol=0.1):
@@ -745,6 +786,8 @@ async def _predict_race_impl(
         "morning_odds":         ("배당", False),           # lower = better
         "jockey_changed":       ("기수 교체", None),
         "jockey_win_rate_delta":("기수 교체 효과", True),  # positive = better jockey came in
+        "recent_workout_time_s":("조교 타임", False),       # lower = faster = better
+        "recent_workout_rank":  ("조교 순위", False),       # lower = better
     }
 
     def _top_reasons(row: dict, field_rows: list[dict], weights: dict) -> list[dict]:

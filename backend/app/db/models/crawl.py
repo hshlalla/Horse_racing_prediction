@@ -132,6 +132,21 @@ class OddsSnapshot(Base):
     place_odds: Mapped[Optional[float]] = mapped_column(Float)
 
 
+class WorkoutTime(Base):
+    __tablename__ = "workout_times"
+    __table_args__ = (UniqueConstraint("horse_id", "workout_date", "distance_m"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    horse_id: Mapped[int] = mapped_column(Integer, ForeignKey("horses.id"), nullable=False)
+    workout_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    workout_type: Mapped[Optional[str]] = mapped_column(String(20))  # 주행심사/실기심사
+    distance_m: Mapped[int] = mapped_column(Integer, default=1000)
+    time_s: Mapped[Optional[float]] = mapped_column(Float)   # seconds, e.g. 65.2 for 1:05.2
+    rank: Mapped[Optional[int]] = mapped_column(Integer)     # rank in workout group
+    group_size: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+
 class Scratching(Base):
     __tablename__ = "scratchings"
     __table_args__ = (UniqueConstraint("race_id", "horse_id"),)

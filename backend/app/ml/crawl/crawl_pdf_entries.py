@@ -24,7 +24,7 @@ import httpx
 import pdfplumber
 
 from app.db.session import async_session_factory
-from app.ml.crawl.upsert import upsert_horse, upsert_jockey, upsert_trainer, upsert_race, upsert_race_entry
+from app.ml.crawl.upsert import upsert_horse, upsert_jockey, upsert_trainer, upsert_race, upsert_race_entry, upsert_workout_time
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,74 @@ HORSE_LINE_RE = re.compile(
 TRAINER_RE = re.compile(r"\((\d+)조\)([가-힣]{2,5})")
 # 등록번호에서 성별·나이 추출: 3수(230823) → 나이=3, 성=수
 AGE_SEX_RE = re.compile(r"^(\d+)(수|암|거)\((\d{6})\)")
+
+# 조교 날짜 헤더: 260521-2R 주행심사 1000 비18%
+WORKOUT_DATE_RE = re.compile(r"(\d{6})[-–](\d+)R\s*(주행심사|실기심사|장해심사|조교|경주)")
+# 조교 파트너 라인: ⑤ 1엠파이어1:05.2 54.0 코지
+# ①–⑮ 원형숫자
+_CIRCLE = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
+WORKOUT_ENTRY_RE = re.compile(
+    rf"([{_CIRCLE}])\s*(\d{{1,2}})([가-힣A-Za-z]{{2,7}})\s*(\d):(\d{{2}})\.(\d)"
+)
+
+
+def _parse_workout_time(time_str_parts: tuple) -> float:
+    """Convert (minutes, seconds, tenths) to total seconds."""
+    m, s, t = int(time_str_parts[0]), int(time_str_parts[1]), int(time_str_parts[2])
+    return m * 60 + s + t / 10
+
+
+def _circle_to_rank(circle: str) -> int:
+    return _CIRCLE.index(circle) + 1
+
+
+def _yymmdd_to_date(yymmdd: str) -> Optional[datetime.date]:
+    try:
+        y = int(yymmdd[:2]) + 2000
+        return datetime.date(y, int(yymmdd[2:4]), int(yymmdd[4:6]))
+    except Exception:
+        return None
+
+
+def _extract_workouts(lines: List[str], prog_number: int, horse_name: str) -> List[Dict]:
+    """
+    From a horse's text block, extract workout sessions for this horse
+    identified by name abbreviation (PDF truncates name to ~4 chars).
+    Returns list of dicts, one per session (newest first).
+    """
+    # Find workout date headers: YYMMDD-NR 주행심사 1000 ...
+    workout_dates: List[datetime.date] = []
+    workout_types: List[str] = []
+    for line in lines:
+        for m in WORKOUT_DATE_RE.finditer(line):
+            d = _yymmdd_to_date(m.group(1))
+            if d:
+                workout_dates.append(d)
+                workout_types.append(m.group(3))
+
+    if not workout_dates:
+        return []
+
+    # Match by name abbreviation: PDF uses the first ~4 chars of the full name
+    combined = "\n".join(lines)
+    results: List[Dict] = []
+    for m in WORKOUT_ENTRY_RE.finditer(combined):
+        abbrev = m.group(3)  # e.g. "엠파이어", "마호", "슈프림다"
+        # Check if the horse's name starts with the abbreviation
+        if horse_name.startswith(abbrev) or abbrev == horse_name:
+            rank = _circle_to_rank(m.group(1))
+            time_s = _parse_workout_time((m.group(4), m.group(5), m.group(6)))
+            idx = len(results)
+            if idx < len(workout_dates):
+                results.append({
+                    "workout_date": workout_dates[idx],
+                    "workout_type": workout_types[idx] if idx < len(workout_types) else "주행심사",
+                    "distance_m": 1000,
+                    "time_s": time_s,
+                    "rank": rank,
+                })
+
+    return results
 
 
 def _clean_name(name: str) -> str:
@@ -96,17 +164,23 @@ def _parse_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
     # --- parse horses ---
     # We look for lines matching HORSE_LINE_RE
     current: Optional[Dict] = None
+    current_lines: List[str] = []
     jockey_seen = False
+
+    def _finalize(entry: Dict, block_lines: List[str]) -> None:
+        entry["workout_records"] = _extract_workouts(
+            block_lines, entry["program_number"], entry["horse_name"]
+        )
 
     for line in lines:
         m = HORSE_LINE_RE.match(line)
         if m:
             if current:
+                _finalize(current, current_lines)
                 entries.append(current)
             prog = int(m.group(1))
             name = _clean_name(m.group(2))
             carry = float(m.group(3))
-            # body weight: look ahead — format "462 468 471" near body weight delta
             current = {
                 "program_number": prog,
                 "horse_name": name,
@@ -118,12 +192,16 @@ def _parse_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
                 "horse_sex": None,
                 "distance_m": race_info["distance_m"],
                 "grade": race_info["grade"],
+                "workout_records": [],
             }
+            current_lines = [line]
             jockey_seen = False
             continue
 
         if current is None:
             continue
+
+        current_lines.append(line)
 
         # Age/sex from registration line: e.g. "3수(230823)갈색"
         if not current["horse_age"]:
@@ -157,6 +235,7 @@ def _parse_pdf_pages(pdf_bytes: bytes) -> List[Dict]:
             jockey_seen = True
 
     if current:
+        _finalize(current, current_lines)
         entries.append(current)
 
     return entries
@@ -249,6 +328,19 @@ async def crawl_pdf_entries(
                             morning_odds=None,
                         )
                         entries_saved += 1
+
+                        # Save workout times
+                        for wk in entry.get("workout_records") or []:
+                            await upsert_workout_time(
+                                session,
+                                horse_id=horse_id,
+                                workout_date=wk["workout_date"],
+                                workout_type=wk.get("workout_type"),
+                                distance_m=wk.get("distance_m", 1000),
+                                time_s=wk.get("time_s"),
+                                rank=wk.get("rank"),
+                                group_size=None,  # group size parsed separately if needed
+                            )
 
                     logger.info("Saved %s %d경주 (%d말)", track_name, rc_no, len(horse_entries))
 

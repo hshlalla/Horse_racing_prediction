@@ -16,6 +16,8 @@ FEATURES = [
     'odds_drift',   # (opening-closing)/opening — money-flow signal
     'jockey_changed',         # 1 if jockey differs from previous race
     'jockey_win_rate_delta',  # current jockey win rate - previous jockey win rate
+    'recent_workout_time_s',  # most recent 1000m workout time in seconds (lower = faster)
+    'recent_workout_rank',    # rank in workout group (lower = better)
 ]
 TARGET = 'relevance'
 
@@ -54,7 +56,9 @@ SELECT
     res.finish_time_s,
     CASE WHEN res.finish_position = 1 THEN 1 ELSE 0 END as is_win,
     odds_snap.opening_odds,
-    odds_snap.closing_odds
+    odds_snap.closing_odds,
+    wk.time_s AS recent_workout_time_s,
+    wk.rank   AS recent_workout_rank
 FROM races r
 JOIN race_entries e ON r.id = e.race_id
 JOIN horses h ON e.horse_id = h.id
@@ -75,6 +79,14 @@ LEFT JOIN (
     FROM odds_snapshots
     WHERE win_odds IS NOT NULL
 ) odds_snap ON odds_snap.race_id = r.id AND odds_snap.horse_id = e.horse_id
+LEFT JOIN LATERAL (
+    SELECT time_s, rank
+    FROM workout_times
+    WHERE horse_id = e.horse_id
+      AND workout_date < r.race_date
+    ORDER BY workout_date DESC
+    LIMIT 1
+) wk ON true
 ORDER BY r.race_date, r.id
 """
 
@@ -238,6 +250,10 @@ def _apply_features(df: pd.DataFrame):
         ).fillna(0.0).clip(-1.0, 2.0)
     else:
         df['odds_drift'] = 0.0
+
+    # Workout features (NULL = no workout data recorded before this race)
+    df['recent_workout_time_s'] = df['recent_workout_time_s'].fillna(70.0)   # slow = unknown
+    df['recent_workout_rank'] = df['recent_workout_rank'].fillna(8).astype(int)
 
     df.sort_values(['race_date', 'race_id'], inplace=True)
     df['finish_time_s'] = df['finish_time_s'].fillna(999.0)
