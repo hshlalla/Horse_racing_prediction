@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 from sqlalchemy import (
-    Integer, Date, DateTime, Float, ForeignKey,
+    Boolean, Integer, Date, DateTime, Float, ForeignKey,
     String, Text, UniqueConstraint, func, text, JSON
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -17,6 +17,8 @@ class Horse(Base):
     age: Mapped[Optional[int]] = mapped_column(Integer)
     breed_origin: Mapped[Optional[str]] = mapped_column(String(20))
     import_year: Mapped[Optional[int]] = mapped_column(Integer)
+    last_start_training_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    last_start_training_passed: Mapped[Optional[bool]] = mapped_column(Boolean)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
 
@@ -144,6 +146,8 @@ class WorkoutTime(Base):
     time_s: Mapped[Optional[float]] = mapped_column(Float)   # seconds, e.g. 65.2 for 1:05.2
     rank: Mapped[Optional[int]] = mapped_column(Integer)     # rank in workout group
     group_size: Mapped[Optional[int]] = mapped_column(Integer)
+    start_training_passed: Mapped[Optional[bool]] = mapped_column(Boolean)
+    swim_count_recent: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
 
