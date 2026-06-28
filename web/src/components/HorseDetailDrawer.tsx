@@ -8,6 +8,9 @@ interface HorseDetailDrawerProps {
   features: {
     win_probability: number;
     place_probability: number;
+    edge_score?: number;
+    market_prob?: number;
+    top_reasons?: Array<{ feature: string; label: string; direction: number }>;
     distance_win_rate: number;
     jockey_horse_win_rate: number;
     horse_win_rate: number;
@@ -64,6 +67,45 @@ export function HorseDetailDrawer({ isOpen, onClose, horseName, features }: Hors
               <X size={20} />
             </button>
           </div>
+
+          {/* Edge score banner */}
+          {features.edge_score !== undefined && Math.abs(features.edge_score) >= 0.02 && (
+            <div className={`mb-4 px-4 py-2.5 rounded-xl border flex items-center justify-between ${
+              features.edge_score >= 0.05
+                ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                : features.edge_score <= -0.05
+                ? 'bg-slate-700/40 border-white/5 text-slate-400'
+                : 'bg-slate-800/40 border-white/5 text-slate-400'
+            }`}>
+              <span className="text-xs font-bold">
+                {features.edge_score >= 0.05 ? '🔥 시장 과소평가' : features.edge_score <= -0.05 ? '📉 시장 과대평가' : '— 시장과 유사'}
+              </span>
+              <div className="text-right text-xs">
+                <div className="font-black">{features.edge_score >= 0 ? '+' : ''}{Math.round(features.edge_score * 100)}%</div>
+                <div className="text-[10px] opacity-70">
+                  AI {Math.round(features.win_probability * 100)}% vs 시장 {Math.round((features.market_prob ?? 0) * 100)}%
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* AI 분석 근거 */}
+          {features.top_reasons && features.top_reasons.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs uppercase tracking-widest font-bold text-slate-500 mb-2">AI 분석 근거</p>
+              <div className="flex flex-wrap gap-2">
+                {features.top_reasons.map((r, i) => (
+                  <span key={i} className={`text-xs font-semibold px-3 py-1 rounded-full border ${
+                    r.direction > 0
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                  }`}>
+                    {r.direction > 0 ? '↑' : '↓'} {r.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Radar chart */}

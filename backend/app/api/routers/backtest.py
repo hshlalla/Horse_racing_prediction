@@ -77,29 +77,28 @@ async def get_daily_backtest(date: str = Query(..., description="YYYY-MM-DD form
                     "finish_position": pos,
                 })
 
-            # Check WIN
-            win_hit = False
+            actual_top3_nums = [str(a["program_number"]) for a in actual_top3 if a["program_number"]]
+
+            # Determine hits from actual results (not payouts) so missing payouts don't hide correct picks
+            win_hit = bool(actual_top3_nums and actual_top3_nums[0] == top1_num)
+            q_hit = bool(len(actual_top3_nums) >= 2 and set(actual_top3_nums[:2]) == top2_nums)
+            t_hit = bool(len(actual_top3_nums) >= 3 and set(actual_top3_nums[:3]) == top3_nums)
+
+            # Return amounts require payouts odds
             win_return = 0
             for p in payouts.get("win", []):
                 if p["numbers"] == top1_num:
                     win_return = 1000 * p["odds"]
-                    win_hit = True
 
-            # Check QUINELLA
-            q_hit = False
             q_return = 0
             for p in payouts.get("quinella", []):
                 if set(p["numbers"].split("-")) == top2_nums:
                     q_return = 1000 * p["odds"]
-                    q_hit = True
 
-            # Check TRIO
-            t_hit = False
             t_return = 0
             for p in payouts.get("trio", []):
                 if set(p["numbers"].split("-")) == top3_nums:
                     t_return = 1000 * p["odds"]
-                    t_hit = True
 
             totals["win"]["investment"] += 1000
             totals["win"]["return"] += win_return

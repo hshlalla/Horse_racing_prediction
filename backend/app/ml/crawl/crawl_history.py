@@ -48,12 +48,14 @@ async def _ingest_race(session, rc_date: str, meet: str, rc_no: int) -> bool:
     track = TRACK_MAP.get(meet, "SEOUL")
     d_obj = datetime.datetime.strptime(rc_date, "%Y%m%d").date()
 
+    KST = datetime.timezone(datetime.timedelta(hours=9))
     pt_str = meta.get("post_time_str")
     post_time_dt = None
     if pt_str:
         try:
             post_time_dt = datetime.datetime.combine(
-                d_obj, datetime.datetime.strptime(pt_str, "%H:%M").time()
+                d_obj, datetime.datetime.strptime(pt_str, "%H:%M").time(),
+                tzinfo=KST,
             )
         except Exception:
             pass
@@ -71,6 +73,8 @@ async def _ingest_race(session, rc_date: str, meet: str, rc_no: int) -> bool:
         grade=meta.get("grade"),
         field_size=len(details),
         post_time=post_time_dt,
+        video_url=meta.get("video_url"),
+        payouts=parsed.get("payouts"),
     )
 
     for d in details:

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
+import { parseRaceTime } from "../lib/time";
 
 export interface Race {
   id: number;
@@ -27,7 +28,7 @@ export function RaceCard({ race }: { race: Race }) {
             <span className="ml-2 font-bold text-slate-900">{race.race_name || `Race ${race.race_number}`}</span>
           </div>
           <div className="text-sm font-semibold text-gray-600">
-            {format(new Date(race.post_time), "HH:mm")}
+            {race.post_time ? format(parseRaceTime(race.post_time)!, "HH:mm") : ""}
           </div>
         </div>
         <div className="text-xs text-gray-500 flex gap-2">

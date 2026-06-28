@@ -70,6 +70,33 @@ async def list_races(
         ))
     return RaceListResponse(items=items)
 
+@router.post("/{race_id}/fetch-results")
+async def fetch_race_results(race_id: int, db: AsyncSession = Depends(get_db)):
+    """KRA에서 경주 결과를 즉시 크롤링합니다."""
+    from sqlalchemy import delete
+    from app.db.models.crawl import Race, RacePrediction
+    from app.ml.crawl.pipeline import _ingest_race_detail
+    from app.db.session import async_session_factory
+
+    race = await race_service.get_race_detail(db, race_id)
+    if not race:
+        return error_response("RACE_NOT_FOUND", "Race not found", 404)
+
+    race_date_str = race.race_date.strftime("%Y%m%d")
+
+    async with async_session_factory() as session:
+        ok = await _ingest_race_detail(session, race.track, race_date_str, race.race_number)
+
+    if not ok:
+        return {"ok": False, "message": "KRA에서 결과를 아직 가져올 수 없습니다. 잠시 후 다시 시도해주세요."}
+
+    # 예측 캐시 삭제 (결과 반영)
+    await db.execute(delete(RacePrediction).where(RacePrediction.race_id == race_id))
+    await db.commit()
+
+    return {"ok": True, "message": "결과를 성공적으로 가져왔습니다."}
+
+
 @router.get("/{race_id}", response_model=RaceDetailResponse)
 async def get_race(race_id: int, db: AsyncSession = Depends(get_db)):
     race = await race_service.get_race_detail(db, race_id)

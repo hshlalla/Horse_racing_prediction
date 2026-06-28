@@ -20,3 +20,8 @@ export async function fetchPredictions(raceId: number) {
   const res = await apiClient.get(`/races/${raceId}/predictions`);
   return res.data;
 }
+
+export async function fetchRaceResults(raceId: number) {
+  const res = await apiClient.post(`/races/${raceId}/fetch-results`);
+  return res.data;
+}

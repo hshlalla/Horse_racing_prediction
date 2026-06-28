@@ -57,7 +57,9 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
                       track_condition: Optional[str] = None, weather: Optional[str] = None,
                       humidity: Optional[int] = None,
                       grade: Optional[str] = None, field_size: Optional[int] = None,
-                      post_time: Optional[datetime.datetime] = None) -> int:
+                      post_time: Optional[datetime.datetime] = None,
+                      video_url: Optional[str] = None,
+                      payouts: Optional[dict] = None) -> int:
     stmt = (
         pg_insert(Race)
         .values(
@@ -65,7 +67,7 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
             race_name=race_name, distance_m=distance_m, surface=surface,
             track_condition=track_condition, weather=weather,
             humidity=humidity, grade=grade, field_size=field_size,
-            post_time=post_time,
+            post_time=post_time, video_url=video_url, payouts=payouts,
         )
         .on_conflict_do_update(
             index_elements=["track", "race_date", "race_number"],
@@ -78,7 +80,12 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
                 "humidity": sa.literal(humidity),
                 "grade": sa.literal(grade),
                 "field_size": sa.literal(field_size),
-                "post_time": sa.literal(post_time),
+                "post_time": sa.func.coalesce(sa.literal(post_time), sa.text("races.post_time")),
+                # Use COALESCE so backfilled values aren't overwritten by NULL
+                "video_url": sa.func.coalesce(sa.literal(video_url), sa.text("races.video_url")),
+                "payouts": sa.func.coalesce(
+                    sa.literal(payouts, type_=sa.JSON), sa.text("races.payouts")
+                ),
             },
         )
         .returning(Race.id)

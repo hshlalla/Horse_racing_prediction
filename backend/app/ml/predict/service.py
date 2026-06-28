@@ -70,6 +70,7 @@ FEATURES = [
     "morning_odds_rank",
     "distance_win_rate",
     "jockey_horse_win_rate",
+    "odds_drift",
 ]
 
 # ---------------------------------------------------------------------------
@@ -139,6 +140,9 @@ class HorsePrediction(BaseModel):
     program_number: int
     win_probability: float
     place_probability: float
+    edge_score: float = 0.0          # model_prob - market_implied_prob
+    market_prob: float = 0.0         # 1/odds normalised (market consensus)
+    top_reasons: list[dict] = []     # [{"feature": str, "label": str, "direction": +1/-1}]
     model_versions: dict
     features_snapshot: dict
     computed_at: datetime.datetime
@@ -529,13 +533,15 @@ async def _predict_race_impl(
         )
         n = len(entries)
         uniform = 1.0 / n
+        # Harville top-2 for uniform field: 2/n
+        uniform_place = 2.0 / n
         return [
             HorsePrediction(
                 horse_id=e.horse_id,
                 horse_name="unknown",
                 program_number=e.program_number,
                 win_probability=uniform,
-                place_probability=min(uniform * 3.0, 0.99),
+                place_probability=uniform_place,
                 model_versions={"status": "no_model"},
                 features_snapshot={},
                 computed_at=datetime.datetime.now(datetime.timezone.utc),
@@ -626,6 +632,7 @@ async def _predict_race_impl(
             "morning_odds_rank": 0,   # placeholder — filled after the loop
             "distance_win_rate": distance_win_rate,
             "jockey_horse_win_rate": jockey_horse_win_rate,
+            "odds_drift": 0.0,   # populated after race from odds_snapshots; 0 at inference
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
@@ -684,10 +691,80 @@ async def _predict_race_impl(
         hid: h.name for hid, h in horses.items()
     }
 
+    # Market-implied probabilities (normalised 1/odds)
+    mkt_probs = anchor  # already normalised inverse-odds
+
+    # SHAP importance weights from model (global, per-feature)
+    shap_weights: dict = {}
+    if hasattr(model, "shap_importance") and model.shap_importance:
+        shap_weights = model.shap_importance
+
+    _FEATURE_LABELS = {
+        "horse_win_rate":       ("마필 승률", True),
+        "jockey_win_rate":      ("기수 승률", True),
+        "trainer_win_rate":     ("조교사 승률", True),
+        "distance_win_rate":    ("거리 적합성", True),
+        "jockey_horse_win_rate":("기수-말 궁합", True),
+        "past_avg_s1f_time":    ("초반 스피드", False),   # lower = faster = better
+        "past_avg_g3f_time":    ("직선 스피드", False),
+        "past_avg_finish_rank": ("최근 착순", False),      # lower = better
+        "body_weight_delta_kg": ("체중 증감", None),
+        "days_since_last_race": ("출전 간격", None),
+        "morning_odds":         ("배당", False),           # lower = better
+    }
+
+    def _top_reasons(row: dict, field_rows: list[dict], weights: dict) -> list[dict]:
+        """Return top-3 distinguishing features for this horse vs field average."""
+        field_vals = {k: [r.get(k, 0) for r in field_rows] for k in _FEATURE_LABELS}
+        reasons = []
+        for feat, (label, higher_is_better) in _FEATURE_LABELS.items():
+            v = row.get(feat)
+            if v is None or not isinstance(v, (int, float)):
+                continue
+            vals = [x for x in field_vals[feat] if isinstance(x, (int, float))]
+            if len(vals) < 2:
+                continue
+            avg = float(np.mean(vals))
+            std = float(np.std(vals)) or 1.0
+            z = (v - avg) / std
+            w = weights.get(feat, 1.0)
+            if higher_is_better is True:
+                direction = 1 if z > 0.5 else (-1 if z < -0.5 else 0)
+            elif higher_is_better is False:
+                direction = 1 if z < -0.5 else (-1 if z > 0.5 else 0)
+            else:
+                direction = 0
+            if direction != 0:
+                reasons.append({
+                    "feature": feat,
+                    "label": label,
+                    "direction": direction,
+                    "z_score": round(z, 2),
+                    "weight": round(w, 4),
+                    "score": abs(z) * w,
+                })
+        reasons.sort(key=lambda x: -x["score"])
+        return [{"feature": r["feature"], "label": r["label"], "direction": r["direction"]}
+                for r in reasons[:3]]
+
+    field_rows_list = list(rows)
+    win_probs_all = [float(blended[i]) for i in range(len(entries))]
+
+    def _harville_top2(win_probs: list[float], idx: int) -> float:
+        """P(horse idx finishes 1st or 2nd) via Harville/Plackett-Luce formula."""
+        p_i = win_probs[idx]
+        place = p_i  # P(1st)
+        for j, p_j in enumerate(win_probs):
+            if j != idx and p_j < 1.0:
+                place += p_j * p_i / (1.0 - p_j)
+        return min(place, 0.99)
+
     predictions: list[HorsePrediction] = []
     for i, (entry, row) in enumerate(zip(entries, rows)):
-        win_prob = float(blended[i])
-        place_prob = float(min(win_prob * 3.0, 0.99))
+        win_prob = win_probs_all[i]
+        place_prob = _harville_top2(win_probs_all, i)
+        edge = round(win_prob - float(mkt_probs[i]), 4)
+        reasons = _top_reasons(row, field_rows_list, shap_weights)
         predictions.append(
             HorsePrediction(
                 horse_id=entry.horse_id,
@@ -697,6 +774,9 @@ async def _predict_race_impl(
                 program_number=entry.program_number,
                 win_probability=win_prob,
                 place_probability=place_prob,
+                edge_score=edge,
+                market_prob=round(float(mkt_probs[i]), 4),
+                top_reasons=reasons,
                 model_versions={"track": race.track, "version": model_version},
                 features_snapshot={
                     k: v for k, v in row.items() if not k.startswith("_")

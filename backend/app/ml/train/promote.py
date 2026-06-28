@@ -64,9 +64,12 @@ def promote_if_better(
     current = get_production_metrics(track)
 
     if current is not None:
-        if val_log_loss >= current["log_loss"] or val_roi < 0:
+        # Promote only when log_loss strictly improves.
+        # ROI is tracked but not used as a gate — KRA's 27.5% takeout makes
+        # positive ROI nearly impossible even for a well-calibrated ranker.
+        if val_log_loss >= current["log_loss"]:
             logger.info(
-                "[%s] Rejected: log_loss %.4f vs %.4f, roi %.4f",
+                "[%s] Rejected: log_loss %.4f not better than %.4f (roi %.4f)",
                 track,
                 val_log_loss,
                 current["log_loss"],

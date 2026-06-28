@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { format } from "date-fns";
+import { parseRaceTime } from "../lib/time";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchRaceDetail, fetchPredictions } from "../api/races";
+import { fetchRaceDetail, fetchPredictions, fetchRaceResults } from "../api/races";
 import { fetchFavorites, addFavorite, removeFavorite } from "../api/favorites";
 import { ProbabilityBar } from "../components/ProbabilityBar";
 import { Toast } from "../components/Toast";
 import { HorseDetailDrawer } from "../components/HorseDetailDrawer";
 import { BettingSuggestion } from "../components/BettingSuggestion";
-import { ArrowLeft, Star } from "lucide-react";
+import { ArrowLeft, Star, RefreshCw } from "lucide-react";
 import { useAuthStore } from "../lib/store";
 
 const trackNameMap: Record<string, string> = { SEOUL: "서울", BUSAN: "부산", JEJU: "제주" };
@@ -40,6 +41,22 @@ export default function RaceDetailPage() {
   });
 
   const favSet = new Set(favorites?.items?.map((f: any) => f.horse.id) || []);
+
+  const fetchResults = useMutation({
+    mutationFn: () => fetchRaceResults(Number(raceId)),
+    onSuccess: (data) => {
+      if (data.ok) {
+        queryClient.invalidateQueries({ queryKey: ["race", raceId] });
+        queryClient.invalidateQueries({ queryKey: ["predictions", raceId] });
+        setToastMessage({ msg: "결과를 가져왔습니다!", type: "success" });
+      } else {
+        setToastMessage({ msg: data.message || "결과를 가져올 수 없습니다.", type: "error" });
+      }
+    },
+    onError: () => {
+      setToastMessage({ msg: "오류가 발생했습니다. 잠시 후 다시 시도해주세요.", type: "error" });
+    },
+  });
 
   const toggleFavorite = useMutation({
     mutationFn: async ({ horseId, isFav }: { horseId: number, isFav: boolean }) => {
@@ -77,6 +94,8 @@ export default function RaceDetailPage() {
   const predMap = new Map(predictions?.items?.map((p: any) => [p.horse_id, p]));
   const hasResults = race.entries?.some((e: any) => e.finish_position != null);
   const isPastRace = hasResults;
+  const isRaceDatePast = race.race_date <= new Date().toISOString().split("T")[0];
+  const canFetchResults = !hasResults && isRaceDatePast;
 
   // Latest odds update time from predictions
   const latestComputedAt = predictions?.items?.reduce((latest: string | null, p: any) => {
@@ -113,6 +132,16 @@ export default function RaceDetailPage() {
                 결과 확정
               </span>
             )}
+            {canFetchResults && (
+              <button
+                onClick={() => fetchResults.mutate()}
+                disabled={fetchResults.isPending}
+                className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 transition-all disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={fetchResults.isPending ? "animate-spin" : ""} />
+                {fetchResults.isPending ? "가져오는 중..." : "결과 가져오기"}
+              </button>
+            )}
             <div className="text-sm font-semibold bg-white/10 px-3 py-1 rounded-full border border-white/5 shadow-inner">
               {race.distance_m}m
             </div>
@@ -128,7 +157,7 @@ export default function RaceDetailPage() {
           </span>
           {latestComputedAt && (
             <span className="bg-slate-900 px-2 py-1 rounded border border-white/5 text-slate-500">
-              🕐 배당 {format(new Date(latestComputedAt), "HH:mm")} 기준
+              🕐 배당 {format(parseRaceTime(latestComputedAt)!, "HH:mm")} 기준
             </span>
           )}
         </div>
@@ -295,28 +324,33 @@ export default function RaceDetailPage() {
         }).map((entry: any, index: number) => {
           const pred = predMap.get(entry.horse_id) as any;
           const isFav = favSet.has(entry.horse_id);
-          // Highlight the AI's 1st pick
           const isTopPick = index === 0;
           const medal = getMedalBadge(entry.finish_position);
-          const isValueBet = entry.morning_odds && pred && (pred.win_probability * entry.morning_odds > 1.2);
+          // edge_score > 0.05: model sees 5%+ more chance than market implies
+          const edgeScore: number = pred?.edge_score ?? 0;
+          const isValueBet = edgeScore >= 0.05;
+          const edgePct = Math.round(edgeScore * 100);
           
           return (
             <div 
               key={entry.id} 
               onClick={() => {
-                if (pred?.features_snapshot) {
+                if (pred) {
                   setDrawerHorse({
                     name: entry.horse_name,
                     features: {
                       win_probability: pred.win_probability,
                       place_probability: pred.place_probability,
-                      distance_win_rate: pred.features_snapshot.distance_win_rate,
-                      jockey_horse_win_rate: pred.features_snapshot.jockey_horse_win_rate,
-                      horse_win_rate: pred.features_snapshot.horse_win_rate,
-                      past_avg_start_rank: pred.features_snapshot.past_avg_start_rank,
-                      past_avg_mid_rank: pred.features_snapshot.past_avg_mid_rank,
-                      past_avg_finish_rank: pred.features_snapshot.past_avg_finish_rank,
-                      past_avg_g3f_time: pred.features_snapshot.past_avg_g3f_time,
+                      edge_score: pred.edge_score ?? 0,
+                      market_prob: pred.market_prob ?? 0,
+                      top_reasons: pred.top_reasons ?? [],
+                      distance_win_rate: pred.features_snapshot?.distance_win_rate,
+                      jockey_horse_win_rate: pred.features_snapshot?.jockey_horse_win_rate,
+                      horse_win_rate: pred.features_snapshot?.horse_win_rate,
+                      past_avg_start_rank: pred.features_snapshot?.past_avg_start_rank,
+                      past_avg_mid_rank: pred.features_snapshot?.past_avg_mid_rank,
+                      past_avg_finish_rank: pred.features_snapshot?.past_avg_finish_rank,
+                      past_avg_g3f_time: pred.features_snapshot?.past_avg_g3f_time,
                       carry_weight_kg: entry.carry_weight_kg,
                     }
                   });
@@ -328,7 +362,12 @@ export default function RaceDetailPage() {
             >
               {isValueBet && (
                 <div className="absolute -top-3 right-4 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-[10px] font-bold px-3 py-0.5 rounded-full shadow-lg shadow-rose-500/40 whitespace-nowrap z-10 animate-pulse">
-                  🔥 Value Bet
+                  🔥 시장 대비 +{edgePct}%
+                </div>
+              )}
+              {!isValueBet && edgeScore < -0.05 && (
+                <div className="absolute -top-3 right-4 bg-slate-700/80 text-slate-400 text-[10px] font-bold px-3 py-0.5 rounded-full whitespace-nowrap z-10">
+                  시장 대비 {edgePct}%
                 </div>
               )}
               {isTopPick && (
@@ -360,10 +399,15 @@ export default function RaceDetailPage() {
                     <div className="text-xs text-slate-400 font-medium mt-0.5">
                       기수: <span className="text-slate-300">{entry.jockey_name || "-"}</span> • 조교사: <span className="text-slate-300">{entry.trainer_name || "-"}</span>
                     </div>
-                    <div className="flex gap-2 mt-1">
+                    <div className="flex flex-wrap gap-1.5 mt-1">
                       {entry.morning_odds > 0 && (
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${isValueBet ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' : 'bg-slate-800 text-emerald-400 border-white/5'}`}>
                           배당 {entry.morning_odds}배
+                        </span>
+                      )}
+                      {pred?.market_prob > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded border bg-slate-800/60 text-slate-400 border-white/5">
+                          시장 {Math.round(pred.market_prob * 100)}%
                         </span>
                       )}
                     </div>
@@ -388,17 +432,36 @@ export default function RaceDetailPage() {
               {pred && (
                 <div className="mt-5 pl-14 space-y-3">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 flex justify-between">
+                    <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5">
                       <span>우승 확률</span>
                     </div>
                     <ProbabilityBar probability={pred.win_probability} color="from-indigo-500 to-purple-500" />
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 flex justify-between">
+                    <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5">
                       <span>연승 확률</span>
                     </div>
                     <ProbabilityBar probability={pred.place_probability} color="from-teal-400 to-emerald-500" />
                   </div>
+                  {pred.top_reasons?.length > 0 && (
+                    <div className="pt-1">
+                      <div className="text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1.5">AI 분석 근거</div>
+                      <div className="flex flex-wrap gap-1">
+                        {pred.top_reasons.map((r: any, i: number) => (
+                          <span
+                            key={i}
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                              r.direction > 0
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                            }`}
+                          >
+                            {r.direction > 0 ? '↑' : '↓'} {r.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

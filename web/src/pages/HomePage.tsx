@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchRaces } from "../api/races";
 import { format } from "date-fns";
+import { parseRaceTime } from "../lib/time";
 
 const TRACK_ORDER = ["SEOUL", "BUSAN", "JEJU"];
 const TRACK_LABEL: Record<string, string> = { SEOUL: "서울", BUSAN: "부산", JEJU: "제주" };
@@ -19,7 +20,8 @@ const TRACK_SECTION: Record<string, string> = {
 function getRaceStatus(postTime: string | null | undefined) {
   if (!postTime) return null;
   const now = new Date();
-  const start = new Date(postTime);
+  const start = parseRaceTime(postTime);
+  if (!start) return null;
   const diffMin = (now.getTime() - start.getTime()) / 60000;
   if (diffMin < -1) return { label: "예정", cls: "bg-slate-700/60 text-slate-300 border-slate-600/40" };
   if (diffMin < 30) return { label: "진행중", cls: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse" };
@@ -42,7 +44,7 @@ export default function HomePage() {
       .sort((a: any, b: any) => {
         if (!a.post_time) return 1;
         if (!b.post_time) return -1;
-        return new Date(a.post_time).getTime() - new Date(b.post_time).getTime();
+        return (parseRaceTime(a.post_time)?.getTime() ?? 0) - (parseRaceTime(b.post_time)?.getTime() ?? 0);
       });
     return acc;
   }, {});
@@ -108,7 +110,7 @@ export default function HomePage() {
                             </span>
                           )}
                           <span className="text-sm font-medium text-slate-400">
-                            {race.post_time ? format(new Date(race.post_time), "HH:mm") : ""}
+                            {race.post_time ? format(parseRaceTime(race.post_time)!, "HH:mm") : ""}
                           </span>
                         </div>
                       </div>

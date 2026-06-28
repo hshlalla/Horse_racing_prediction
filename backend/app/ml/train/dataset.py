@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import sqlite3
 import datetime
 import os
@@ -12,6 +13,7 @@ FEATURES = [
     'humidity', 'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank',
     'surface', 'grade', 'body_weight_delta_kg', 'morning_odds_rank',
     'distance_win_rate', 'jockey_horse_win_rate',
+    'odds_drift',   # (opening-closing)/opening — money-flow signal
 ]
 TARGET = 'relevance'
 
@@ -48,13 +50,29 @@ SELECT
     t.corner7_rank,
     res.finish_position,
     res.finish_time_s,
-    CASE WHEN res.finish_position = 1 THEN 1 ELSE 0 END as is_win
+    CASE WHEN res.finish_position = 1 THEN 1 ELSE 0 END as is_win,
+    odds_snap.opening_odds,
+    odds_snap.closing_odds
 FROM races r
 JOIN race_entries e ON r.id = e.race_id
 JOIN horses h ON e.horse_id = h.id
 LEFT JOIN pedigree p ON h.id = p.horse_id
 LEFT JOIN inrace_timings t ON r.id = t.race_id AND e.horse_id = t.horse_id
 LEFT JOIN race_results res ON r.id = res.race_id AND e.horse_id = res.horse_id
+LEFT JOIN (
+    SELECT
+        race_id, horse_id,
+        FIRST_VALUE(win_odds) OVER (
+            PARTITION BY race_id, horse_id ORDER BY snapshot_time
+        ) AS opening_odds,
+        LAST_VALUE(win_odds) OVER (
+            PARTITION BY race_id, horse_id
+            ORDER BY snapshot_time
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) AS closing_odds
+    FROM odds_snapshots
+    WHERE win_odds IS NOT NULL
+) odds_snap ON odds_snap.race_id = r.id AND odds_snap.horse_id = e.horse_id
 ORDER BY r.race_date, r.id
 """
 
@@ -181,11 +199,31 @@ def _apply_features(df: pd.DataFrame):
     )
 
     # Morning odds rank within race (1 = favourite = lowest odds)
+    # Fill NaN odds with a large number so unknown-odds horses rank last
+    df['_odds_filled'] = df.groupby('race_id')['morning_odds'].transform(
+        lambda x: x.fillna(x.max() if x.notna().any() else 99.9)
+    )
     df['morning_odds_rank'] = (
-        df.groupby('race_id')['morning_odds']
+        df.groupby('race_id')['_odds_filled']
         .rank(method='min', ascending=True)
+        .fillna(df['field_size'])
         .astype(int)
     )
+    df['morning_odds'] = df['morning_odds'].fillna(df['_odds_filled'])
+    df.drop(columns=['_odds_filled'], inplace=True)
+
+    # Odds drift: (opening - closing) / opening
+    # Positive = odds shortened (money came in = hot pick late)
+    # Negative = odds drifted out (money went elsewhere)
+    if 'opening_odds' in df.columns and 'closing_odds' in df.columns:
+        df['opening_odds'] = df['opening_odds'].fillna(df['morning_odds'])
+        df['closing_odds'] = df['closing_odds'].fillna(df['morning_odds'])
+        df['odds_drift'] = (
+            (df['opening_odds'] - df['closing_odds'])
+            / df['opening_odds'].replace(0, np.nan)
+        ).fillna(0.0).clip(-1.0, 2.0)
+    else:
+        df['odds_drift'] = 0.0
 
     df.sort_values(['race_date', 'race_id'], inplace=True)
     df['finish_time_s'] = df['finish_time_s'].fillna(999.0)

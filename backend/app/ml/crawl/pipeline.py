@@ -53,13 +53,15 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
             track=track,
             race_date=race_date,
             race_number=rc_no,
-            race_name=f"{rc_no}경주",
+            race_name=meta.get("race_name", f"{rc_no}경주"),
             distance_m=meta.get("distance_m", 1200),
-            surface=detail.get("surface", "DIRT"),
+            surface=meta.get("surface", "Dirt"),
             track_condition=meta.get("track_condition"),
             weather=meta.get("weather"),
             humidity=meta.get("humidity"),
             field_size=len(detail["horses"]),
+            video_url=meta.get("video_url"),
+            payouts=detail.get("payouts"),
         )
 
         for h in detail["horses"]:
