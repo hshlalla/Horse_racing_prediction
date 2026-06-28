@@ -52,11 +52,21 @@ export default function ROIReportPage() {
     },
   });
 
-  const formatMoney = (val: number) => new Intl.NumberFormat("ko-KR").format(val) + "원";
+  const formatMoney = (val: number) => new Intl.NumberFormat("ko-KR").format(Math.round(val)) + "원";
   const calcROI = (ret: number, inv: number) =>
     inv > 0 ? (((ret - inv) / inv) * 100).toFixed(1) : "0.0";
 
   const latestROI = trendData?.length ? trendData[trendData.length - 1].roi : null;
+
+  // 경주를 트랙별로 그룹화
+  const groupedRaces: Record<string, any[]> = {};
+  if (data?.races) {
+    for (const race of data.races) {
+      if (!groupedRaces[race.track]) groupedRaces[race.track] = [];
+      groupedRaces[race.track].push(race);
+    }
+  }
+  const trackOrder = ["SEOUL", "BUSAN", "JEJU"];
 
   return (
     <div className="max-w-7xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-28">
@@ -93,7 +103,8 @@ export default function ROIReportPage() {
         {/* Trend chart */}
         {trendData && trendData.length > 0 && (
           <div className="bg-slate-900 border border-white/10 rounded-2xl p-5 shadow-xl">
-            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">월별 누적 수익률</h2>
+            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">월별 누적 수익률</h2>
+            <p className="text-[10px] text-slate-600 mb-4">배당 데이터 있는 경주만 집계</p>
             <div className="h-52">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
@@ -122,6 +133,11 @@ export default function ROIReportPage() {
         {/* Subtitle */}
         <p className="text-sm text-slate-500">
           📅 <span className="text-slate-300 font-semibold">{date}</span> 경기에 AI가 베팅했다면?
+          {data && (
+            <span className="ml-2 text-slate-600 text-xs">
+              전체 {data.total_races}경주 중 배당 데이터: {data.races_with_payout ?? 0}경주
+            </span>
+          )}
         </p>
 
         {isLoading && (
@@ -147,6 +163,7 @@ export default function ROIReportPage() {
 
         {data && data.total_races > 0 && (() => {
           const hasResults = data.races.some((r: any) => r.actual_results?.length > 0);
+          const hasPayouts = (data.races_with_payout ?? 0) > 0;
 
           return (
             <>
@@ -159,9 +176,9 @@ export default function ROIReportPage() {
                   </p>
                   <div className="grid grid-cols-3 gap-3 text-center text-xs">
                     {[
-                      { label: "단승", val: data.totals.win.investment, c: "text-indigo-300" },
-                      { label: "복승", val: data.totals.quinella.investment, c: "text-purple-300" },
-                      { label: "삼복승", val: data.totals.trio.investment, c: "text-pink-300" },
+                      { label: "단승", val: data.total_races * 1000, c: "text-indigo-300" },
+                      { label: "복승", val: data.total_races * 1000, c: "text-purple-300" },
+                      { label: "삼복승", val: data.total_races * 1000, c: "text-pink-300" },
                     ].map(({ label, val, c }) => (
                       <div key={label} className="bg-white/5 border border-white/10 rounded-xl p-3">
                         <div className="text-slate-500 mb-1">{label}</div>
@@ -170,8 +187,8 @@ export default function ROIReportPage() {
                     ))}
                   </div>
                 </div>
-              ) : (
-                /* Past race summary cards */
+              ) : hasPayouts ? (
+                /* Past race summary cards - 배당 데이터 있는 경주만 */
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   {[
                     { key: "win", label: "단승식", sub: "1착 맞추기", color: "indigo" },
@@ -181,6 +198,7 @@ export default function ROIReportPage() {
                     const s = data.totals[key];
                     const roi = parseFloat(calcROI(s.return, s.investment));
                     const pos = roi >= 0;
+                    const racesWithPayout = s.races_with_payout ?? 0;
                     return (
                       <div key={key} className="relative overflow-hidden bg-white/5 border border-white/10 rounded-2xl p-5 shadow-lg">
                         <div className={`absolute top-0 left-0 w-full h-1 ${BET_TOP_COLOR[color]}`} />
@@ -205,91 +223,122 @@ export default function ROIReportPage() {
                           </div>
                           <div className="flex justify-between">
                             <span className="text-slate-500">적중</span>
-                            <span className="text-indigo-300 font-semibold">{s.hits} / {data.total_races}경기</span>
+                            <span className="text-indigo-300 font-semibold">{s.hits} / {racesWithPayout}경기</span>
                           </div>
                         </div>
+                        {data.total_races > racesWithPayout && (
+                          <p className="text-[10px] text-slate-600 mt-2">
+                            배당 미확인 {data.total_races - racesWithPayout}경주 제외
+                          </p>
+                        )}
                       </div>
                     );
                   })}
                 </div>
+              ) : (
+                /* 결과는 있지만 배당 데이터 없음 */
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-sm text-amber-300">
+                  결과 데이터는 있으나 배당 데이터가 아직 수집되지 않았습니다. 배당 업데이트 후 다시 확인해주세요.
+                </div>
               )}
 
-              {/* Per-race list */}
+              {/* Per-race list - 트랙별 그룹화 */}
               <div>
                 <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3">경주별 결과</h2>
-                <div className="space-y-2.5">
-                  {data.races.map((race: any) => (
-                    <div key={race.race_id} className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/[0.07] transition-all">
-                      <div className="flex justify-between items-center mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="bg-indigo-500/20 text-indigo-300 text-[11px] font-bold px-2 py-0.5 rounded border border-indigo-500/30">
-                            {trackNameMap[race.track] || race.track}
-                          </span>
-                          <span className="font-semibold text-slate-100 text-sm">제{race.race_number}경주</span>
-                        </div>
-                        <button
-                          onClick={() => navigate(`/races/${date}/${race.race_id}`)}
-                          className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-                        >
-                          상세 →
-                        </button>
+                {trackOrder
+                  .filter((track) => groupedRaces[track]?.length > 0)
+                  .map((track) => (
+                    <div key={track} className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-white/10">
+                          {trackNameMap[track] || track}
+                        </span>
+                        <span className="text-xs text-slate-600">{groupedRaces[track].length}경주</span>
                       </div>
-
-                      <div className="grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <p className="text-[10px] uppercase tracking-widest font-bold text-slate-600 mb-2">🤖 AI 예측</p>
-                          <div className="space-y-1">
-                            {race.ai_picks.map((pick: any) => (
-                              <div key={pick.rank} className="flex items-center gap-2 text-slate-300">
-                                <span className="w-4 text-slate-500 font-bold">{pick.rank}</span>
-                                <span className="bg-slate-800 px-2 py-0.5 rounded font-mono border border-white/5">{pick.program_number}번</span>
-                                <span className="text-slate-600">{(pick.win_prob * 100).toFixed(1)}%</span>
+                      <div className="space-y-2.5">
+                        {groupedRaces[track].map((race: any) => (
+                          <div key={race.race_id} className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/[0.07] transition-all">
+                            <div className="flex justify-between items-center mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-slate-100 text-sm">제{race.race_number}경주</span>
+                                {!race.has_payout && race.actual_results?.length > 0 && (
+                                  <span className="text-[10px] text-amber-500 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">배당미확인</span>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <p className="text-[10px] uppercase tracking-widest font-bold text-slate-600 mb-2">🏆 실제 결과</p>
-                          {race.actual_results?.length > 0 ? (
-                            <div className="space-y-1">
-                              {race.actual_results.map((r: any) => (
-                                <div key={r.finish_position} className="flex items-center gap-2 text-slate-300">
-                                  <span>{r.finish_position === 1 ? "🥇" : r.finish_position === 2 ? "🥈" : "🥉"}</span>
-                                  <span className="bg-slate-800 px-2 py-0.5 rounded font-mono border border-white/5">{r.program_number}번</span>
-                                </div>
-                              ))}
+                              <button
+                                onClick={() => navigate(`/races/${date}/${race.race_id}`)}
+                                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                              >
+                                상세 →
+                              </button>
                             </div>
-                          ) : (
-                            <span className="text-slate-600 italic text-xs">결과 대기 중...</span>
-                          )}
-                        </div>
-                      </div>
 
-                      {race.actual_results?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/5">
-                          {[
-                            { key: "win", label: "단승", hit: race.bets.win.hit, ret: race.bets.win.return },
-                            { key: "quinella", label: "복승", hit: race.bets.quinella.hit, ret: race.bets.quinella.return },
-                            { key: "trio", label: "삼복승", hit: race.bets.trio.hit, ret: race.bets.trio.return },
-                          ].map(({ key, label, hit, ret }) => (
-                            <span
-                              key={key}
-                              className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
-                                hit
-                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]"
-                                  : "bg-white/5 text-slate-600 border-white/5"
-                              }`}
-                            >
-                              {hit ? <CheckCircle size={11} /> : <XCircle size={11} />}
-                              {label}
-                              {hit && <span className="font-black ml-0.5">+{formatMoney(ret - 1000)}</span>}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                            <div className="grid grid-cols-2 gap-4 text-xs">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-slate-600 mb-2">🤖 AI 예측</p>
+                                {race.ai_picks.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {race.ai_picks.map((pick: any) => (
+                                      <div key={pick.rank} className="flex items-center gap-2 text-slate-300">
+                                        <span className="w-4 text-slate-500 font-bold">{pick.rank}</span>
+                                        <span className="bg-slate-800 px-2 py-0.5 rounded font-mono border border-white/5">{pick.program_number}번</span>
+                                        <span className="text-slate-600">{(pick.win_prob * 100).toFixed(1)}%</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-600 italic">예측 데이터 없음</span>
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-slate-600 mb-2">🏆 실제 결과</p>
+                                {race.actual_results?.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {race.actual_results.map((r: any) => (
+                                      <div key={r.finish_position} className="flex items-center gap-2 text-slate-300">
+                                        <span>{r.finish_position === 1 ? "🥇" : r.finish_position === 2 ? "🥈" : "🥉"}</span>
+                                        <span className="bg-slate-800 px-2 py-0.5 rounded font-mono border border-white/5">{r.program_number}번</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-600 italic text-xs">결과 대기 중...</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {race.actual_results?.length > 0 && race.ai_picks.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/5">
+                                {[
+                                  { key: "win",      label: "단승",   hit: race.bets.win.hit,      ret: race.bets.win.return },
+                                  { key: "quinella", label: "복승",   hit: race.bets.quinella.hit, ret: race.bets.quinella.return },
+                                  { key: "trio",     label: "삼복승", hit: race.bets.trio.hit,      ret: race.bets.trio.return },
+                                ].map(({ key, label, hit, ret }) => (
+                                  <span
+                                    key={key}
+                                    className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
+                                      hit
+                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]"
+                                        : "bg-white/5 text-slate-600 border-white/5"
+                                    }`}
+                                  >
+                                    {hit ? <CheckCircle size={11} /> : <XCircle size={11} />}
+                                    {label}
+                                    {hit && race.has_payout && ret > 0 && (
+                                      <span className="font-black ml-0.5">+{formatMoney(ret - 1000)}</span>
+                                    )}
+                                    {hit && !race.has_payout && (
+                                      <span className="ml-0.5 text-amber-400 text-[10px]">배당미확인</span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
-                </div>
               </div>
             </>
           );
