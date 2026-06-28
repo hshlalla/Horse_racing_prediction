@@ -44,13 +44,14 @@ def run_shap_analysis(model, X_val, features: list[str], output_dir: str = "mode
     logger.info("Computing SHAP values for %d samples, %d features...", len(X_val), len(features))
 
     # Use TreeExplainer for tree-based models
+    # CatBoost with categorical features requires feature_perturbation="tree_path_dependent"
     try:
-        explainer = shap.TreeExplainer(model)
+        explainer = shap.TreeExplainer(model, feature_perturbation="tree_path_dependent")
         shap_values = explainer.shap_values(X_val[features])
     except Exception as e:
         logger.warning("TreeExplainer failed (%s), falling back to Explainer", e)
         try:
-            explainer = shap.Explainer(model, X_val[features])
+            explainer = shap.Explainer(model)
             shap_values = explainer(X_val[features]).values
         except Exception as e2:
             logger.error("SHAP analysis failed: %s", e2)

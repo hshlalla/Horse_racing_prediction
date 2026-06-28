@@ -275,6 +275,29 @@ async def _get_win_rate(
     return float(rate) if rate is not None else 0.0
 
 
+async def _get_prev_jockey(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> tuple:
+    """Return (prev_jockey_id, prev_jockey_win_rate) from the horse's most recent race before as_of_date."""
+    from sqlalchemy import func, case
+    stmt = (
+        select(RaceEntry.jockey_id)
+        .join(Race, RaceEntry.race_id == Race.id)
+        .where(RaceEntry.horse_id == horse_id)
+        .where(Race.race_date < as_of_date)
+        .order_by(Race.race_date.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    prev_jockey_id = result.scalar()
+    if not prev_jockey_id:
+        return None, 0.0
+    prev_win_rate = await _get_win_rate(session, prev_jockey_id, "jockey_id", as_of_date)
+    return prev_jockey_id, prev_win_rate
+
+
 async def _get_prev_body_weight(
     session: AsyncSession,
     horse_id: int,
@@ -600,6 +623,13 @@ async def _predict_race_impl(
         jockey_horse_win_rate = await _get_pair_win_rate(
             session, entry.jockey_id or 0, entry.horse_id, today
         )
+        prev_jockey_id, prev_jockey_win_rate = await _get_prev_jockey(
+            session, entry.horse_id, today
+        )
+        jockey_changed = int(
+            prev_jockey_id is not None and prev_jockey_id != entry.jockey_id
+        )
+        jockey_win_rate_delta = jockey_win_rate - prev_jockey_win_rate
 
         row: dict = {
             "jockey_id": entry.jockey_id or 0,
@@ -633,6 +663,8 @@ async def _predict_race_impl(
             "distance_win_rate": distance_win_rate,
             "jockey_horse_win_rate": jockey_horse_win_rate,
             "odds_drift": 0.0,   # populated after race from odds_snapshots; 0 at inference
+            "jockey_changed": jockey_changed,
+            "jockey_win_rate_delta": jockey_win_rate_delta,
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
@@ -711,6 +743,8 @@ async def _predict_race_impl(
         "body_weight_delta_kg": ("체중 증감", None),
         "days_since_last_race": ("출전 간격", None),
         "morning_odds":         ("배당", False),           # lower = better
+        "jockey_changed":       ("기수 교체", None),
+        "jockey_win_rate_delta":("기수 교체 효과", True),  # positive = better jockey came in
     }
 
     def _top_reasons(row: dict, field_rows: list[dict], weights: dict) -> list[dict]:

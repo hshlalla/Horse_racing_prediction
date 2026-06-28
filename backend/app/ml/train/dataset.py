@@ -14,6 +14,8 @@ FEATURES = [
     'surface', 'grade', 'body_weight_delta_kg', 'morning_odds_rank',
     'distance_win_rate', 'jockey_horse_win_rate',
     'odds_drift',   # (opening-closing)/opening — money-flow signal
+    'jockey_changed',         # 1 if jockey differs from previous race
+    'jockey_win_rate_delta',  # current jockey win rate - previous jockey win rate
 ]
 TARGET = 'relevance'
 
@@ -184,6 +186,18 @@ def _apply_features(df: pd.DataFrame):
         .transform(lambda x: x.shift(1).ewm(span=5, min_periods=1).mean())
         .fillna(0.0)
     )
+
+    # Jockey change: did the jockey change from the previous race for this horse?
+    df.sort_values(['horse_id', 'race_date', 'race_id'], inplace=True)
+    df['_prev_jockey_id'] = df.groupby('horse_id')['jockey_id'].shift(1)
+    df['_prev_jockey_win_rate'] = df.groupby('horse_id')['jockey_win_rate'].shift(1)
+    df['jockey_changed'] = (
+        df['_prev_jockey_id'].notna() & (df['jockey_id'] != df['_prev_jockey_id'])
+    ).astype(int)
+    df['jockey_win_rate_delta'] = (
+        df['jockey_win_rate'] - df['_prev_jockey_win_rate']
+    ).fillna(0.0)
+    df.drop(columns=['_prev_jockey_id', '_prev_jockey_win_rate'], inplace=True)
 
     df['relevance'] = df['finish_position'].apply(
         lambda x: 3 if x == 1 else (2 if x == 2 else (1 if x == 3 else 0))
