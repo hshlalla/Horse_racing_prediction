@@ -12,7 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
 
-    private val baseUrl = "http://10.0.2.2:5173"
+    private val baseUrl = "http://192.168.219.101:8000"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {

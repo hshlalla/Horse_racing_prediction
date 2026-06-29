@@ -7,6 +7,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import FavoritesPage from "./pages/FavoritesPage";
 import ROIReportPage from "./pages/ROIReportPage";
+import InvestmentPage from "./pages/InvestmentPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { BottomNav } from "./components/BottomNav";
 import { fetchLatestRaceDate } from "./api/races";
@@ -60,6 +61,7 @@ function App() {
           <Route path="/races/:date/:raceId" element={<RaceDetailPage />} />
           <Route path="/horses/:horseId" element={<HorsePage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/investment" element={<InvestmentPage />} />
           <Route path="/reports/roi" element={<ROIReportPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />

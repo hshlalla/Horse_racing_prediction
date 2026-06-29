@@ -164,7 +164,8 @@ def compute_kelly_roi(model, val_df, features: list) -> float:
     bankroll = 1_000_000.0
 
     for _race_id, group in df.groupby("race_id"):
-        odds_vals = group["morning_odds"].values
+        # Cap odds to avoid astronomical compounding from extreme longshots
+        odds_vals = np.clip(group["morning_odds"].values, 1.01, 50.0)
         prob_vals = group["_prob"].values
 
         best_idx = -1
@@ -188,4 +189,9 @@ def compute_kelly_roi(model, val_df, features: list) -> float:
         if len(winner_indices) > 0 and best_idx == winner_indices[0]:
             bankroll += bet_amount * odds_vals[best_idx]
 
-    return (bankroll - 1_000_000.0) / 1_000_000.0
+    roi = (bankroll - 1_000_000.0) / 1_000_000.0
+    # Guard against numerical overflow from compounding
+    if not np.isfinite(roi) or abs(roi) > 1e6:
+        logger.warning("Kelly ROI overflow detected (%.3e) — clamping to 0.0", roi)
+        return 0.0
+    return roi

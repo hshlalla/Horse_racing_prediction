@@ -4,15 +4,33 @@ from scipy.special import softmax
 
 
 def _race_log_loss(model, val_df: pd.DataFrame, features: list, target: str) -> float:
-    """Compute per-race softmax log-loss for a model on the val set."""
+    """Compute per-race softmax log-loss for a model on the val set.
+
+    Passes race_ids to models that support it (EnsembleShim) so the blend uses
+    its per-race softmax path. Without this, EnsembleShim.predict applies a
+    GLOBAL softmax that squashes all scores to ~1/N near-equal values; the
+    subsequent per-race softmax of those then collapses to a uniform
+    distribution, making the metric a constant ≈ ln(field_size) regardless of
+    the model. Individual ModelShims don't accept race_ids (TypeError → raw).
+    """
     df = val_df.copy()
-    df['_score'] = model.predict(df[features])
+    try:
+        df['_score'] = model.predict(df[features], race_ids=df['race_id'])
+    except TypeError:
+        df['_score'] = model.predict(df[features])
     losses = []
     for _, race in df.groupby('race_id'):
         y_true = (race[target].values == 3).astype(int)
         if y_true.sum() == 0:
             continue
-        probs = softmax(race['_score'].values)
+        s = race['_score'].values
+        # Ensemble (with race_ids) already returns a per-race probability
+        # distribution (≥0, sums to 1) — use it directly. Raw model scores
+        # (individual ModelShims) need a softmax to become probabilities.
+        if np.all(s >= 0) and abs(float(s.sum()) - 1.0) < 1e-3:
+            probs = s
+        else:
+            probs = softmax(s)
         probs = np.clip(probs, 1e-7, 1 - 1e-7)
         # negative log probability of the winner
         winner_idx = int(np.argmax(y_true))
@@ -70,11 +88,20 @@ def build_ensemble(models: list, val_df: pd.DataFrame,
     """
     Build a weighted ensemble of ModelShim objects.
 
-    Weight for each model = 1 / val_log_loss, normalised to sum to 1.
-    A lower validation log-loss → higher weight.
+    Weight ∝ the model's *skill above the uniform baseline*
+    (``baseline_log_loss - val_log_loss``), not ``1/log_loss``. Near uniform
+    (≈ ln(field_size)) two models can have similar ``1/loss`` even when one has
+    almost no skill and the other a lot — inverse-loss weighting then dilutes
+    the strong model. Skill-above-baseline gives a near-useless model near-zero
+    weight. Models at/below baseline get a tiny floor weight.
     """
     log_losses = [_race_log_loss(m, val_df, features, target) for m in models]
-    inv_losses = [1.0 / max(ll, 1e-7) for ll in log_losses]
-    total = sum(inv_losses)
-    weights = [w / total for w in inv_losses]
+
+    # Uniform-prediction baseline: mean ln(field_size) over scored races.
+    field_sizes = val_df.groupby('race_id').size()
+    baseline = float(np.log(field_sizes).mean())
+
+    skills = [max(baseline - ll, 1e-3) for ll in log_losses]  # floor keeps weights valid
+    total = sum(skills)
+    weights = [sk / total for sk in skills]
     return EnsembleShim(models, weights)

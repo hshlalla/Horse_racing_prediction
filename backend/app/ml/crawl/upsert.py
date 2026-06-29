@@ -92,10 +92,14 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
                 "grade": sa.literal(grade),
                 "field_size": sa.literal(field_size),
                 "post_time": sa.func.coalesce(sa.literal(post_time), sa.text("races.post_time")),
-                # Use COALESCE so backfilled values aren't overwritten by NULL
                 "video_url": sa.func.coalesce(sa.literal(video_url), sa.text("races.video_url")),
-                "payouts": sa.func.coalesce(
-                    sa.literal(payouts, type_=sa.JSON), sa.text("races.payouts")
+                # payouts=None means caller has no payout data → preserve existing
+                # (sa.literal(None, JSON) serializes as JSON null, not SQL NULL,
+                #  so COALESCE wouldn't protect it — guard in Python instead)
+                "payouts": (
+                    sa.literal(payouts, type_=sa.JSON)
+                    if payouts is not None
+                    else sa.text("races.payouts")
                 ),
             },
         )

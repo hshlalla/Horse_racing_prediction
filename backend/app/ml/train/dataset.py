@@ -4,26 +4,37 @@ import sqlite3
 import datetime
 import os
 
+# Feature set v2 (2026-06-29): pruned 17 dead/sparse features, added 5 severity-tiered
+# health features. Dropped (all-zero importance across SEOUL/BUSAN/JEJU champions):
+#   body_weight_kg, body_weight_delta_kg, horse_age, horse_sex, track, surface,
+#   grade, humidity, sire_win_rate, odds_drift, jockey_changed
+# Dropped (workout data structurally sparse ~8% coverage, train/val mismatch):
+#   recent_workout_time_s, recent_workout_rank, swim_count_recent,
+#   recent_workout_count_30d, start_training_passed, days_since_start_training
+# These columns are still produced by the SQL/feature code so they can be re-added
+# once their underlying data is dense enough to measure.
 FEATURES = [
+    # --- Core market / form features (proven importance) ---
     'jockey_id', 'trainer_id', 'program_number', 'distance_m', 'field_size',
-    'carry_weight_kg', 'body_weight_kg', 'morning_odds', 'horse_age', 'horse_sex',
-    'track', 'track_condition', 'weather', 'days_since_last_race',
-    'horse_win_rate', 'jockey_win_rate', 'trainer_win_rate', 'sire_win_rate',
+    'carry_weight_kg', 'morning_odds', 'track_condition', 'weather',
+    'days_since_last_race',
+    'horse_win_rate', 'jockey_win_rate', 'trainer_win_rate',
     'past_avg_s1f_time', 'past_avg_g3f_time',
-    'humidity', 'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank',
-    'surface', 'grade', 'body_weight_delta_kg', 'morning_odds_rank',
-    'distance_win_rate', 'jockey_horse_win_rate',
-    'odds_drift',   # (opening-closing)/opening — money-flow signal
-    'jockey_changed',         # 1 if jockey differs from previous race
+    'past_avg_start_rank', 'past_avg_mid_rank', 'past_avg_finish_rank',
+    'morning_odds_rank', 'distance_win_rate', 'jockey_horse_win_rate',
     'jockey_win_rate_delta',  # current jockey win rate - previous jockey win rate
-    'recent_workout_time_s',  # most recent 1000m workout time in seconds (lower = faster)
-    'recent_workout_rank',    # rank in workout group (lower = better)
-    'injury_count_30d',       # health incidents in 30 days before race
-    'days_since_injury',      # days since most recent health record (999 = never)
-    'start_training_passed',      # 1=통과, 0=불합격, -1=미기록
-    'days_since_start_training',  # 마지막 출발훈련 이후 일수 (999=미기록)
-    'swim_count_recent',          # 최근 수영훈련 횟수
-    'recent_workout_count_30d',   # 최근 30일 조교 횟수
+    # --- Health features (non-market signal) ---
+    # Confirmed predictive 2026-06-29: with clean morning_odds AND the fixed
+    # _race_log_loss metric, adding these drops SEOUL ensemble val_log_loss
+    # 1.9438 → 1.9080. (Earlier "no effect" was an artifact of the broken metric
+    # + corrupted odds — both fixed.)
+    'injury_count_30d',           # all health incidents in 30 days before race
+    'days_since_injury',          # days since most recent health record (999 = never)
+    'serious_injury_count_30d',   # locomotor/serious injuries in 30 days (파행/근육통/관절염/골절/건염/마비/부종)
+    'serious_injury_count_90d',   # locomotor/serious injuries in 90 days
+    'days_since_serious_injury',  # days since last serious injury (999 = never)
+    'illness_count_30d',          # systemic illness in 30 days (감기/식욕부진/출혈/위궤양/비염)
+    'chronic_injury_rate',        # lifetime health records ÷ career starts (만성 약체마 지표)
 ]
 TARGET = 'relevance'
 
@@ -70,6 +81,11 @@ SELECT
     wk.swim_count_recent,
     hr.injury_count_30d,
     hr.days_since_injury,
+    hr.serious_injury_count_30d,
+    hr.serious_injury_count_90d,
+    hr.days_since_serious_injury,
+    hr.illness_count_30d,
+    hr.total_injury_count,
     wk_cnt.recent_workout_count_30d
 FROM races r
 JOIN race_entries e ON r.id = e.race_id
@@ -109,7 +125,25 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT
         COUNT(*) FILTER (WHERE record_date >= r.race_date - INTERVAL '30 days') AS injury_count_30d,
-        (r.race_date - MAX(record_date))::int AS days_since_injury
+        (r.race_date - MAX(record_date))::int AS days_since_injury,
+        -- 운동기·중증 질환 (경주력 직접 타격): 파행/근육통/관절염/골절/건염/마비/부종
+        COUNT(*) FILTER (
+            WHERE record_date >= r.race_date - INTERVAL '30 days'
+              AND condition IN ('파행','근육통','관절염','골절','건염','마비','부종')
+        ) AS serious_injury_count_30d,
+        COUNT(*) FILTER (
+            WHERE record_date >= r.race_date - INTERVAL '90 days'
+              AND condition IN ('파행','근육통','관절염','골절','건염','마비','부종')
+        ) AS serious_injury_count_90d,
+        (r.race_date - MAX(record_date) FILTER (
+            WHERE condition IN ('파행','근육통','관절염','골절','건염','마비','부종')
+        ))::int AS days_since_serious_injury,
+        -- 전신 질환 (컨디션 저하): 감기/식욕부진/출혈/위궤양/비염
+        COUNT(*) FILTER (
+            WHERE record_date >= r.race_date - INTERVAL '30 days'
+              AND condition IN ('감기','식욕부진','출혈','위궤양','비염')
+        ) AS illness_count_30d,
+        COUNT(*) AS total_injury_count
     FROM health_records
     WHERE horse_id = e.horse_id
       AND record_date < r.race_date
@@ -264,6 +298,10 @@ def _apply_features(df: pd.DataFrame):
     )
     df['morning_odds'] = df['morning_odds'].fillna(df['_odds_filled'])
     df.drop(columns=['_odds_filled'], inplace=True)
+    # Clip sentinel/garbage odds (e.g. 9999.9 in some 2021 rows, parse errors).
+    # Real KRA win odds top out well under 200; clipping neutralises sentinels
+    # without distorting the favourite/longshot ordering the model relies on.
+    df['morning_odds'] = df['morning_odds'].clip(lower=1.0, upper=200.0)
 
     # Odds drift: (opening - closing) / opening
     # Positive = odds shortened (money came in = hot pick late)
@@ -306,6 +344,24 @@ def _apply_features(df: pd.DataFrame):
     # Health features (NULL = no health records in DB for this horse before this race)
     df['injury_count_30d'] = df['injury_count_30d'].fillna(0).astype(int)
     df['days_since_injury'] = df['days_since_injury'].fillna(999).astype(int)
+
+    # Severity-tiered health features
+    df['serious_injury_count_30d'] = df['serious_injury_count_30d'].fillna(0).astype(int)
+    df['serious_injury_count_90d'] = df['serious_injury_count_90d'].fillna(0).astype(int)
+    df['days_since_serious_injury'] = (
+        df['days_since_serious_injury'].fillna(999).clip(upper=999).astype(int)
+    )
+    df['illness_count_30d'] = df['illness_count_30d'].fillna(0).astype(int)
+    df['total_injury_count'] = df['total_injury_count'].fillna(0).astype(int)
+
+    # Chronic fragility: lifetime health records ÷ career starts so far.
+    # career_starts uses cumcount (0-based) over the time-sorted per-horse history,
+    # so it counts ONLY prior races — no leakage from the current/future races.
+    df.sort_values(['horse_id', 'race_date', 'race_id'], inplace=True)
+    career_starts = df.groupby('horse_id').cumcount()  # 0 for first start
+    df['chronic_injury_rate'] = (
+        df['total_injury_count'] / (career_starts + 1)
+    ).clip(upper=50.0).astype(float)
 
     df.sort_values(['race_date', 'race_id'], inplace=True)
     df['finish_time_s'] = df['finish_time_s'].fillna(999.0)

@@ -170,7 +170,12 @@ async def scan_board(board_no: int, track: str, start_file_no: int, end_file_no:
 
                 if content and fname and _is_entry_pdf(fname):
                     consecutive_miss = 0
-                    result = await _process_pdf(session, content, fname)
+                    try:
+                        result = await _process_pdf(session, content, fname)
+                    except Exception as pdf_err:
+                        logger.warning("[%s] fileNo=%d %s 파싱 실패 (스킵): %s", track, fno, fname, pdf_err)
+                        fno += 1
+                        continue
                     if result["horses"] > 0:
                         total_pdfs += 1
                         total_horses  += result["horses"]
@@ -225,14 +230,25 @@ async def backfill_all(end_file_no: int = END_FILE_NO) -> list:
     return results
 
 
+TRACK_META = {
+    "SEOUL": (68, 98201),
+    "BUSAN": (84, 98197),
+    "JEJU":  (75, 98194),
+}
+
 if __name__ == "__main__":
-    if len(sys.argv) == 3:
-        # 단일 범위 스캔 (서울만)
-        start = int(sys.argv[1])
-        end = int(sys.argv[2])
-        logger.info("단일 스캔: boardNo=68(서울) fileNo %d ~ %d", start, end)
-        asyncio.run(scan_board(68, "SEOUL", start, end))
+    import argparse as _ap
+    _p = _ap.ArgumentParser()
+    _p.add_argument("--track", choices=["SEOUL", "BUSAN", "JEJU"])
+    _p.add_argument("--start", type=int)
+    _p.add_argument("--end", type=int, default=END_FILE_NO)
+    _args = _p.parse_args()
+
+    if _args.track:
+        _board_no, _default_start = TRACK_META[_args.track]
+        _start = _args.start or _default_start
+        logger.info("단일 스캔: %s boardNo=%d fileNo %d ~ %d", _args.track, _board_no, _start, _args.end)
+        asyncio.run(scan_board(_board_no, _args.track, _start, _args.end))
     else:
-        end = int(sys.argv[1]) if len(sys.argv) == 2 else END_FILE_NO
-        logger.info("전체 백필 시작: 서울/부산/제주 ~ fileNo %d", end)
-        asyncio.run(backfill_all(end))
+        logger.info("전체 백필 시작: 서울/부산/제주 ~ fileNo %d", _args.end)
+        asyncio.run(backfill_all(_args.end))

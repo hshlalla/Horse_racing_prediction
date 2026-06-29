@@ -1,15 +1,19 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Activity, ArrowUpRight, ArrowDownRight, CheckCircle, XCircle } from "lucide-react";
+import { ArrowLeft, Activity, ArrowUpRight, ArrowDownRight, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
 const trackNameMap: Record<string, string> = { SEOUL: "서울", BUSAN: "부산", JEJU: "제주" };
 
 const BET_TOP_COLOR: Record<string, string> = {
   indigo: "bg-indigo-500",
+  teal: "bg-teal-500",
+  sky: "bg-sky-500",
   purple: "bg-purple-500",
-  pink:   "bg-pink-500",
+  amber: "bg-amber-500",
+  rose: "bg-rose-500",
+  fuchsia: "bg-fuchsia-500",
 };
 
 export default function ROIReportPage() {
@@ -19,7 +23,7 @@ export default function ROIReportPage() {
     return searchParams.get("date") || new Date().toISOString().split("T")[0];
   });
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["backtest", date],
     queryFn: async () => {
       const res = await fetch(`/api/reports/backtest?date=${date}`);
@@ -149,8 +153,15 @@ export default function ROIReportPage() {
         )}
 
         {error && (
-          <div className="text-center text-rose-400 py-12 text-sm">
-            데이터를 불러올 수 없습니다. 날짜를 다시 선택해보세요.
+          <div className="flex flex-col items-center gap-3 py-12 text-sm text-rose-400">
+            <p>데이터를 불러올 수 없습니다.</p>
+            <button
+              onClick={() => refetch()}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 transition-colors text-xs font-semibold"
+            >
+              <RefreshCw size={13} />
+              다시 시도
+            </button>
           </div>
         )}
 
@@ -174,11 +185,15 @@ export default function ROIReportPage() {
                   <p className="text-xs text-slate-400 mb-4 leading-relaxed">
                     아직 결과가 확정되지 않았습니다. AI 1순위에 전 경기 1만원씩 베팅하면 필요한 시드:
                   </p>
-                  <div className="grid grid-cols-3 gap-3 text-center text-xs">
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3 text-center text-xs">
                     {[
                       { label: "단승", val: data.total_races * 1000, c: "text-indigo-300" },
-                      { label: "복승", val: data.total_races * 1000, c: "text-purple-300" },
-                      { label: "삼복승", val: data.total_races * 1000, c: "text-pink-300" },
+                      { label: "연승", val: data.total_races * 1000, c: "text-teal-300" },
+                      { label: "복승", val: data.total_races * 1000, c: "text-sky-300" },
+                      { label: "쌍승", val: data.total_races * 1000, c: "text-purple-300" },
+                      { label: "복연승", val: data.total_races * 1000, c: "text-amber-300" },
+                      { label: "삼복승", val: data.total_races * 1000, c: "text-rose-300" },
+                      { label: "삼쌍승", val: data.total_races * 1000, c: "text-fuchsia-300" },
                     ].map(({ label, val, c }) => (
                       <div key={label} className="bg-white/5 border border-white/10 rounded-xl p-3">
                         <div className="text-slate-500 mb-1">{label}</div>
@@ -189,13 +204,18 @@ export default function ROIReportPage() {
                 </div>
               ) : hasPayouts ? (
                 /* Past race summary cards - 배당 데이터 있는 경주만 */
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
                   {[
-                    { key: "win", label: "단승식", sub: "1착 맞추기", color: "indigo" },
-                    { key: "quinella", label: "복승식", sub: "1·2착 맞추기", color: "purple" },
-                    { key: "trio", label: "삼복승식", sub: "1·2·3착 맞추기", color: "pink" },
+                    { key: "win", label: "단승식", sub: "1착", color: "indigo" },
+                    { key: "place", label: "연승식", sub: "1~3착 중 1마리", color: "teal" },
+                    { key: "quinella", label: "복승식", sub: "1,2착 순서무관", color: "sky" },
+                    { key: "exacta", label: "쌍승식", sub: "1,2착 순서적중", color: "purple" },
+                    { key: "quinella_place", label: "복연승식", sub: "1~3착 중 2마리", color: "amber" },
+                    { key: "trio", label: "삼복승식", sub: "1,2,3착 순서무관", color: "rose" },
+                    { key: "trifecta", label: "삼쌍승식", sub: "1,2,3착 순서적중", color: "fuchsia" },
                   ].map(({ key, label, sub, color }) => {
                     const s = data.totals[key];
+                    if (!s) return null; // Fallback if backend not updated
                     const roi = parseFloat(calcROI(s.return, s.investment));
                     const pos = roi >= 0;
                     const racesWithPayout = s.races_with_payout ?? 0;
@@ -283,6 +303,14 @@ export default function ROIReportPage() {
                                         <span className="w-4 text-slate-500 font-bold">{pick.rank}</span>
                                         <span className="bg-slate-800 px-2 py-0.5 rounded font-mono border border-white/5">{pick.program_number}번</span>
                                         <span className="text-slate-600">{(pick.win_prob * 100).toFixed(1)}%</span>
+                                        {pick.morning_odds > 0 && (
+                                          <span className="text-amber-400 text-[10px] font-bold">{pick.morning_odds}x</span>
+                                        )}
+                                        {pick.edge_score !== undefined && (
+                                          <span className={`text-[10px] font-bold ${pick.edge_score >= 0.05 ? "text-emerald-400" : pick.edge_score >= 0 ? "text-slate-500" : "text-rose-500"}`}>
+                                            {pick.edge_score >= 0 ? "+" : ""}{(pick.edge_score * 100).toFixed(1)}%
+                                          </span>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -310,28 +338,37 @@ export default function ROIReportPage() {
                             {race.actual_results?.length > 0 && race.ai_picks.length > 0 && (
                               <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/5">
                                 {[
-                                  { key: "win",      label: "단승",   hit: race.bets.win.hit,      ret: race.bets.win.return },
-                                  { key: "quinella", label: "복승",   hit: race.bets.quinella.hit, ret: race.bets.quinella.return },
-                                  { key: "trio",     label: "삼복승", hit: race.bets.trio.hit,      ret: race.bets.trio.return },
-                                ].map(({ key, label, hit, ret }) => (
-                                  <span
-                                    key={key}
-                                    className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
-                                      hit
-                                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]"
-                                        : "bg-white/5 text-slate-600 border-white/5"
-                                    }`}
-                                  >
-                                    {hit ? <CheckCircle size={11} /> : <XCircle size={11} />}
-                                    {label}
-                                    {hit && race.has_payout && ret > 0 && (
-                                      <span className="font-black ml-0.5">+{formatMoney(ret - 1000)}</span>
-                                    )}
-                                    {hit && !race.has_payout && (
-                                      <span className="ml-0.5 text-amber-400 text-[10px]">배당미확인</span>
-                                    )}
-                                  </span>
-                                ))}
+                                  { key: "win",      label: "단승" },
+                                  { key: "place",    label: "연승" },
+                                  { key: "quinella", label: "복승" },
+                                  { key: "exacta",   label: "쌍승" },
+                                  { key: "quinella_place", label: "복연승" },
+                                  { key: "trio",     label: "삼복승" },
+                                  { key: "trifecta", label: "삼쌍승" },
+                                ].map(({ key, label }) => {
+                                  if (!race.bets[key]) return null; // Fallback for old API
+                                  const hit = race.bets[key].hit;
+                                  const ret = race.bets[key].return;
+                                  return (
+                                    <span
+                                      key={key}
+                                      className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
+                                        hit
+                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]"
+                                          : "bg-white/5 text-slate-600 border-white/5"
+                                      }`}
+                                    >
+                                      {hit ? <CheckCircle size={11} /> : <XCircle size={11} />}
+                                      {label}
+                                      {hit && race.has_payout && ret > 0 && (
+                                        <span className="font-black ml-0.5">+{formatMoney(ret - 1000)}</span>
+                                      )}
+                                      {hit && !race.has_payout && (
+                                        <span className="ml-0.5 text-amber-400 text-[10px]">배당미확인</span>
+                                      )}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>

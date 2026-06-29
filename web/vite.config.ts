@@ -5,6 +5,10 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   // @ts-expect-error - TS complains about react() not being callable
   plugins: [react()],
+  build: {
+    outDir: '../backend/app/static',
+    emptyOutDir: true,
+  },
   server: {
     proxy: {
       '/api': {

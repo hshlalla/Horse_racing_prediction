@@ -53,7 +53,11 @@ def fetch_payouts(meet: str, rc_date: str, rc_no: str) -> dict | None:
 
 async def backfill(year: int | None = None, limit: int | None = None) -> None:
     async with async_session_factory() as s:
-        q = select(Race).where(Race.payouts.is_(None))
+        # payouts IS NULL (SQL null) OR payouts::text = 'null' (JSON null written by bug)
+        from sqlalchemy import or_, cast, String
+        q = select(Race).where(
+            or_(Race.payouts.is_(None), cast(Race.payouts, String) == "null")
+        )
         if year:
             q = q.where(
                 Race.race_date >= datetime.date(year, 1, 1),

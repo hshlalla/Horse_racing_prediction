@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 # Feature list — must match the column order used during training
 # ---------------------------------------------------------------------------
 
+# Must stay in sync with dataset.py FEATURES (v2, 2026-06-29).
+# Inference filters this against the model's actual feature list (model_feature_names),
+# so leftover columns in the row dict are harmless — but every model feature MUST be
+# computed and present in the row dict.
 FEATURES = [
     "jockey_id",
     "trainer_id",
@@ -46,37 +50,31 @@ FEATURES = [
     "distance_m",
     "field_size",
     "carry_weight_kg",
-    "body_weight_kg",
     "morning_odds",
-    "horse_age",
-    "horse_sex",
-    "track",
     "track_condition",
     "weather",
     "days_since_last_race",
     "horse_win_rate",
     "jockey_win_rate",
     "trainer_win_rate",
-    "sire_win_rate",
     "past_avg_s1f_time",
     "past_avg_g3f_time",
-    "humidity",
     "past_avg_start_rank",
     "past_avg_mid_rank",
     "past_avg_finish_rank",
-    "surface",
-    "grade",
-    "body_weight_delta_kg",
     "morning_odds_rank",
     "distance_win_rate",
     "jockey_horse_win_rate",
-    "odds_drift",
-    "jockey_changed",
     "jockey_win_rate_delta",
-    "recent_workout_time_s",
-    "recent_workout_rank",
+    # Health features — confirmed predictive 2026-06-29 (ensemble val_log_loss
+    # 1.9438 → 1.9080). Computed in the row dict by _get_recent_health.
     "injury_count_30d",
     "days_since_injury",
+    "serious_injury_count_30d",
+    "serious_injury_count_90d",
+    "days_since_serious_injury",
+    "illness_count_30d",
+    "chronic_injury_rate",
 ]
 
 # ---------------------------------------------------------------------------
@@ -148,6 +146,7 @@ class HorsePrediction(BaseModel):
     place_probability: float
     edge_score: float = 0.0          # model_prob - market_implied_prob
     market_prob: float = 0.0         # 1/odds normalised (market consensus)
+    upset_probability: float = 0.0   # P(wins at odds > 5x) from value model
     top_reasons: list[dict] = []     # [{"feature": str, "label": str, "direction": +1/-1}]
     model_versions: dict
     features_snapshot: dict
@@ -325,29 +324,124 @@ async def _get_recent_workout(
     return 70.0, 8  # unknown = slow default
 
 
+# Condition tiers — must match the SQL in dataset.py
+_SERIOUS_CONDITIONS = ('파행', '근육통', '관절염', '골절', '건염', '마비', '부종')
+_ILLNESS_CONDITIONS = ('감기', '식욕부진', '출혈', '위궤양', '비염')
+
+
 async def _get_recent_health(
     session: AsyncSession,
     horse_id: int,
     as_of_date: datetime.date,
-) -> tuple:
-    """Return (injury_count_30d, days_since_injury) before as_of_date."""
+) -> dict:
+    """Return all health features before as_of_date as a dict.
+
+    Mirrors the `hr` LATERAL join in dataset.py. chronic_injury_rate is left to
+    the caller (needs career-start count); total_injury_count is returned for it.
+    """
     from app.db.models.crawl import HealthRecord
     from sqlalchemy import func
     cutoff_30d = as_of_date - datetime.timedelta(days=30)
+    cutoff_90d = as_of_date - datetime.timedelta(days=90)
+    serious = HealthRecord.condition.in_(_SERIOUS_CONDITIONS)
+    illness = HealthRecord.condition.in_(_ILLNESS_CONDITIONS)
     stmt = (
         select(
             func.count().filter(HealthRecord.record_date >= cutoff_30d),
             func.max(HealthRecord.record_date),
+            func.count().filter(HealthRecord.record_date >= cutoff_30d, serious),
+            func.count().filter(HealthRecord.record_date >= cutoff_90d, serious),
+            func.max(HealthRecord.record_date).filter(serious),
+            func.count().filter(HealthRecord.record_date >= cutoff_30d, illness),
+            func.count(),
         )
         .where(HealthRecord.horse_id == horse_id)
         .where(HealthRecord.record_date < as_of_date)
     )
     result = await session.execute(stmt)
     row = result.first()
-    count = int(row[0]) if row and row[0] else 0
     max_date = row[1] if row and row[1] else None
-    days = int((as_of_date - max_date).days) if max_date else 999
-    return count, days
+    serious_max = row[4] if row and row[4] else None
+    return {
+        "injury_count_30d": int(row[0]) if row and row[0] else 0,
+        "days_since_injury": int((as_of_date - max_date).days) if max_date else 999,
+        "serious_injury_count_30d": int(row[2]) if row and row[2] else 0,
+        "serious_injury_count_90d": int(row[3]) if row and row[3] else 0,
+        "days_since_serious_injury": (
+            min(int((as_of_date - serious_max).days), 999) if serious_max else 999
+        ),
+        "illness_count_30d": int(row[5]) if row and row[5] else 0,
+        "total_injury_count": int(row[6]) if row and row[6] else 0,
+    }
+
+
+async def _get_start_training(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> tuple:
+    """Return (start_training_passed: int, days_since: int).
+
+    start_training_passed: 1=passed, 0=failed, -1=unknown
+    days_since: days from last_start_training_date to as_of_date, capped at 999
+    """
+    from app.db.models.crawl import Horse as HorseModel
+    stmt = select(
+        HorseModel.last_start_training_passed,
+        HorseModel.last_start_training_date,
+    ).where(HorseModel.id == horse_id)
+    result = await session.execute(stmt)
+    row = result.first()
+    if not row:
+        return -1, 999
+    passed_bool, train_date = row[0], row[1]
+    if passed_bool is None:
+        passed_int = -1
+    elif passed_bool:
+        passed_int = 1
+    else:
+        passed_int = 0
+    if train_date is not None:
+        days = min(int((as_of_date - train_date).days), 999)
+    else:
+        days = 999
+    return passed_int, days
+
+
+async def _get_swim_and_workout_count(
+    session: AsyncSession,
+    horse_id: int,
+    as_of_date: datetime.date,
+) -> tuple:
+    """Return (swim_count_recent: int, recent_workout_count_30d: int)."""
+    from app.db.models.crawl import WorkoutTime
+    from sqlalchemy import func
+
+    # swim_count from most recent workout record
+    swim_stmt = (
+        select(WorkoutTime.swim_count_recent)
+        .where(WorkoutTime.horse_id == horse_id)
+        .where(WorkoutTime.workout_date < as_of_date)
+        .where(WorkoutTime.swim_count_recent.isnot(None))
+        .order_by(WorkoutTime.workout_date.desc())
+        .limit(1)
+    )
+    swim_result = await session.execute(swim_stmt)
+    swim_row = swim_result.scalar()
+    swim_count = int(swim_row) if swim_row else 0
+
+    # workout count in last 30 days
+    cutoff = as_of_date - datetime.timedelta(days=30)
+    count_stmt = (
+        select(func.count())
+        .where(WorkoutTime.horse_id == horse_id)
+        .where(WorkoutTime.workout_date >= cutoff)
+        .where(WorkoutTime.workout_date < as_of_date)
+    )
+    count_result = await session.execute(count_stmt)
+    workout_count = int(count_result.scalar() or 0)
+
+    return swim_count, workout_count
 
 
 async def _get_prev_body_weight(
@@ -686,7 +780,15 @@ async def _predict_race_impl(
         recent_workout_time_s, recent_workout_rank = await _get_recent_workout(
             session, entry.horse_id, today
         )
-        injury_count_30d, days_since_injury = await _get_recent_health(
+        health = await _get_recent_health(session, entry.horse_id, today)
+        chronic_injury_rate = (
+            health["total_injury_count"] / (history["n_starts"] + 1)
+        )
+        chronic_injury_rate = min(chronic_injury_rate, 50.0)
+        start_training_passed, days_since_start_training = await _get_start_training(
+            session, entry.horse_id, today
+        )
+        swim_count_recent, recent_workout_count_30d = await _get_swim_and_workout_count(
             session, entry.horse_id, today
         )
 
@@ -698,7 +800,8 @@ async def _predict_race_impl(
             "field_size": race.field_size or len(entries),
             "carry_weight_kg": entry.carry_weight_kg or 57.0,
             "body_weight_kg": entry.body_weight_kg or 500.0,
-            "morning_odds": entry.morning_odds or 10.0,
+            # clip to match dataset.py: neutralise sentinel/garbage odds (e.g. 9999.9)
+            "morning_odds": min(max(entry.morning_odds or 10.0, 1.0), 200.0),
             "horse_age": horse_age,
             "horse_sex": horse_sex,
             "track": race.track,
@@ -726,8 +829,17 @@ async def _predict_race_impl(
             "jockey_win_rate_delta": jockey_win_rate_delta,
             "recent_workout_time_s": recent_workout_time_s,
             "recent_workout_rank": recent_workout_rank,
-            "injury_count_30d": injury_count_30d,
-            "days_since_injury": days_since_injury,
+            "injury_count_30d": health["injury_count_30d"],
+            "days_since_injury": health["days_since_injury"],
+            "serious_injury_count_30d": health["serious_injury_count_30d"],
+            "serious_injury_count_90d": health["serious_injury_count_90d"],
+            "days_since_serious_injury": health["days_since_serious_injury"],
+            "illness_count_30d": health["illness_count_30d"],
+            "chronic_injury_rate": chronic_injury_rate,
+            "start_training_passed": start_training_passed,
+            "days_since_start_training": days_since_start_training,
+            "swim_count_recent": swim_count_recent,
+            "recent_workout_count_30d": recent_workout_count_30d,
             # Private columns used for cold-start logic (not passed to model)
             "_horse_id": entry.horse_id,
             "_n_starts": history["n_starts"],
@@ -861,6 +973,15 @@ async def _predict_race_impl(
     field_rows_list = list(rows)
     win_probs_all = [float(blended[i]) for i in range(len(entries))]
 
+    # Value model inference (Approach B): P(upset win — odds > 5x and wins)
+    upset_probs = np.zeros(len(entries))
+    value_model = getattr(model, "value_model", None)
+    if value_model is not None:
+        try:
+            upset_probs = value_model.predict_proba(pred_df[model_features])
+        except Exception as exc:
+            logger.debug("Value model inference failed: %s", exc)
+
     def _harville_top2(win_probs: list[float], idx: int) -> float:
         """P(horse idx finishes 1st or 2nd) via Harville/Plackett-Luce formula."""
         p_i = win_probs[idx]
@@ -887,6 +1008,7 @@ async def _predict_race_impl(
                 place_probability=place_prob,
                 edge_score=edge,
                 market_prob=round(float(mkt_probs[i]), 4),
+                upset_probability=round(float(upset_probs[i]), 4),
                 top_reasons=reasons,
                 model_versions={"track": race.track, "version": model_version},
                 features_snapshot={

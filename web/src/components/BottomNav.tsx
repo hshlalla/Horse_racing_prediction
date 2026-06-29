@@ -1,10 +1,11 @@
 import { useNavigate, useLocation } from "react-router-dom";
-import { Home, Star, BarChart2 } from "lucide-react";
+import { Home, Star, BarChart2, TrendingUp } from "lucide-react";
 
 const tabs = [
   { label: "홈", icon: Home, path: "/races" },
   { label: "즐겨찾기", icon: Star, path: "/favorites" },
-  { label: "ROI 리포트", icon: BarChart2, path: "/reports/roi" },
+  { label: "투자", icon: TrendingUp, path: "/investment" },
+  { label: "리포트", icon: BarChart2, path: "/reports/roi" },
 ];
 
 export function BottomNav() {

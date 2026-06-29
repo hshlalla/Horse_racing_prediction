@@ -19,6 +19,7 @@ from app.ml.train.models.catboost_binary import train_catboost
 from app.ml.train.models.ensemble import build_ensemble, _race_log_loss
 from app.ml.train.promote import promote_if_better, compute_kelly_roi, _model_dir
 from app.ml.predict.calibration import fit_calibration
+from app.ml.train.value_model import train_value_model
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,19 @@ def run_train(track: str, db_url: str) -> dict:
         )
     else:
         ensemble.calibrator = None
+
+    # Train value model (Approach B: upset/value win detector)
+    logger.info("[%s] Training value model (upset detector)", track)
+    try:
+        value_model = train_value_model(track_train, track_val, features)
+        ensemble.value_model = value_model
+        if value_model is not None:
+            logger.info("[%s] Value model trained successfully", track)
+        else:
+            logger.warning("[%s] Value model skipped (too few positive cases)", track)
+    except Exception as exc:
+        logger.warning("[%s] Value model training failed: %s", track, exc)
+        ensemble.value_model = None
 
     # Run SHAP feature importance analysis using the LightGBM model
     try:
