@@ -44,8 +44,8 @@ HORSE_LINE_RE = re.compile(
 )
 # 조교사: (50조)박재우 형태
 TRAINER_RE = re.compile(r"\((\d+)조\)([가-힣]{2,5})")
-# 등록번호에서 성별·나이 추출: 3수(230823) → 나이=3, 성=수
-AGE_SEX_RE = re.compile(r"^(\d+)(수|암|거)\((\d{6})\)")
+# 등록번호에서 성별·나이 추출: 3수(230823) → 나이=3, 성=수 (제주마 등 접두어 허용 위해 ^ 제거)
+AGE_SEX_RE = re.compile(r"(\d+)(수|암|거)\((\d{6})\)")
 
 # 조교 날짜 헤더: 260521-2R 주행심사 1000 비18%
 WORKOUT_DATE_RE = re.compile(r"(\d{6})[-–](\d+)R\s*(주행심사|실기심사|장해심사|조교|경주)")
@@ -175,7 +175,12 @@ def _extract_swim(lines: List[str]) -> int:
 
 def _clean_name(name: str) -> str:
     """Remove spaces inserted by PDF renderer between Korean characters."""
-    return re.sub(r"\s+", "", name)
+    cleaned = re.sub(r"\s+", "", name)
+    if cleaned.startswith("제주마"):
+        cleaned = cleaned[3:]
+    elif cleaned.startswith("한라마"):
+        cleaned = cleaned[3:]
+    return cleaned
 
 
 def _extract_distance(text: str) -> Optional[int]:

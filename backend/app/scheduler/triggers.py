@@ -1,7 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from .jobs import crawl_job, predict_job, train_job, notify_job, odds_job, thursday_pdf_crawl_job
+from .jobs import crawl_job, predict_job, train_job, notify_job, odds_job, thursday_pdf_crawl_job, live_results_job
 
 
 def setup_triggers(scheduler: AsyncIOScheduler):
@@ -40,6 +40,13 @@ def setup_triggers(scheduler: AsyncIOScheduler):
         odds_job,
         trigger=IntervalTrigger(minutes=5),
         id="odds",
+    )
+
+    # 매 15분마다: 상세 결과 크롤
+    scheduler.add_job(
+        live_results_job,
+        trigger=IntervalTrigger(minutes=15),
+        id="live_results",
     )
 
     # FCM 알림 (추후 구현)

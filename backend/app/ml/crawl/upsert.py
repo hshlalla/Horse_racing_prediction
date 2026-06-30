@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.crawl import (
-    Horse, HealthRecord, InraceTiming, Jockey, Race, RaceEntry, RaceResult, Trainer, WorkoutTime,
+    Horse, HealthRecord, InraceTiming, Jockey, Race, RaceEntry, RaceResult, Trainer, WorkoutTime, Scratching
 )
 
 
@@ -86,9 +86,9 @@ async def upsert_race(session: AsyncSession, track: str, race_date: datetime.dat
                 "race_name": sa.literal(race_name),
                 "distance_m": sa.literal(distance_m),
                 "surface": sa.literal(surface),
-                "track_condition": sa.literal(track_condition),
-                "weather": sa.literal(weather),
-                "humidity": sa.literal(humidity),
+                "track_condition": sa.func.coalesce(sa.literal(track_condition), sa.text("races.track_condition")),
+                "weather": sa.func.coalesce(sa.literal(weather), sa.text("races.weather")),
+                "humidity": sa.func.coalesce(sa.literal(humidity), sa.text("races.humidity")),
                 "grade": sa.literal(grade),
                 "field_size": sa.literal(field_size),
                 "post_time": sa.func.coalesce(sa.literal(post_time), sa.text("races.post_time")),
@@ -248,6 +248,22 @@ async def upsert_workout_time(
                 "start_training_passed": sa.func.coalesce(sa.literal(start_training_passed), sa.text("workout_times.start_training_passed")),
                 "swim_count_recent": sa.func.coalesce(sa.literal(swim_count_recent), sa.text("workout_times.swim_count_recent")),
             },
+        )
+    )
+    await session.execute(stmt)
+
+
+async def upsert_scratching(session: AsyncSession, race_id: int, horse_id: int,
+                            reason: Optional[str] = None) -> None:
+    stmt = (
+        pg_insert(Scratching)
+        .values(
+            race_id=race_id, horse_id=horse_id, reason=reason,
+            scratched_at=sa.func.now()
+        )
+        .on_conflict_do_update(
+            index_elements=["race_id", "horse_id"],
+            set_={"reason": sa.literal(reason)},
         )
     )
     await session.execute(stmt)

@@ -197,8 +197,11 @@ class KRALiveParser:
                 
         if not target_table:
             meta["completed"] = False
-            return {"meta": meta, "horses": results}
+            return {"meta": meta, "horses": [], "scratchings": []}
             
+        results = []
+        scratchings = []
+        
         rows = target_table.find_all('tr')
         for row in rows:
             cols = row.find_all('td')
@@ -206,6 +209,14 @@ class KRALiveParser:
                 try:
                     rank_str = cols[0].get_text(strip=True)
                     if not rank_str.isdigit():
+                        if rank_str in ["취소", "제외", "실격", "중지"]:
+                            horse_no = int(cols[1].get_text(strip=True))
+                            horse_name = cols[2].get_text(strip=True)
+                            scratchings.append({
+                                "horse_no": horse_no,
+                                "horse_name": horse_name,
+                                "reason": rank_str
+                            })
                         continue
                         
                     rank = int(rank_str)
@@ -301,7 +312,7 @@ class KRALiveParser:
                 except Exception as e:
                     logger.debug(f"Failed to parse payout {raw}: {e}")
 
-        return {"meta": meta, "horses": results, "payouts": payouts}
+        return {"meta": meta, "horses": results, "payouts": payouts, "scratchings": scratchings}
 
     @staticmethod
     def parse_upcoming_race(html_content: str) -> List[Dict[str, Any]]:

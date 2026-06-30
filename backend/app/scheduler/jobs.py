@@ -162,6 +162,22 @@ async def odds_job():
         logger.error("odds_job failed: %s", exc)
 
 
+async def live_results_job():
+    """매 15분: 오늘 진행 중인/완료된 경주의 상세 결과(경주 후 데이터)를 크롤."""
+    now_kst = datetime.datetime.now(KST)
+    if not (11 <= now_kst.hour < 19):
+        return
+
+    try:
+        from app.ml.crawl.pipeline import run_crawl
+        today = datetime.date.today()
+        logger.info("live_results_job: 오늘(%s) 상세 결과 실시간 크롤 시작", today)
+        result = await run_crawl(start_date=today, end_date=today)
+        logger.info("live_results_job done: %s", result)
+    except Exception as exc:
+        logger.error("live_results_job failed: %s", exc)
+
+
 async def notify_job():
     """Every 5 min: send FCM notifications for races starting in 15-30 min."""
     pass

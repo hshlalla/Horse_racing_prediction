@@ -15,7 +15,7 @@ from app.ml.crawl.kra_client import KRAClient
 from app.ml.crawl.parsers.kra_live_parser import KRALiveParser
 from app.ml.crawl.upsert import (
     upsert_horse, upsert_jockey, upsert_trainer,
-    upsert_race, upsert_race_entry, upsert_race_result, upsert_inrace_timing,
+    upsert_race, upsert_race_entry, upsert_race_result, upsert_inrace_timing, upsert_scratching
 )
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,20 @@ async def _ingest_race_detail(session, track: str, race_date_str: str,
                 corner5_rank=h.get("corner5_rank"),
                 corner6_rank=h.get("corner6_rank"),
                 corner7_rank=h.get("corner7_rank"),
+            )
+
+        for s in detail.get("scratchings", []):
+            horse_id = await upsert_horse(
+                session,
+                name=s["horse_name"],
+                sex="M",  # Default if unknown from scratching list
+                age=3,
+            )
+            await upsert_scratching(
+                session,
+                race_id=race_id,
+                horse_id=horse_id,
+                reason=s.get("reason", "취소")
             )
 
         await session.commit()

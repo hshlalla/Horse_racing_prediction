@@ -175,7 +175,7 @@ async def get_daily_backtest(
                             1,
                         ),
                     }
-                    for i, p in enumerate(win_sorted[:3])
+                    for i, p in enumerate(win_sorted[:5])
                 ],
                 "actual_results": actual_top3,
                 "bets": {
