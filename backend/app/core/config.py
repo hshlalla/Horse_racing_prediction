@@ -28,8 +28,4 @@ def get_settings() -> Settings:
     return Settings()
 
 
-try:
-    settings = get_settings()
-except Exception:
-    # During testing, settings may not be available at import time
-    settings = None
+settings = get_settings()

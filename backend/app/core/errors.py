@@ -6,6 +6,14 @@ def error_response(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
 
 
+async def rate_limit_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    return error_response(
+        "RATE_LIMIT_EXCEEDED",
+        "Too many requests. Please try again later.",
+        429,
+    )
+
+
 async def overflow_exception_handler(request: Request, exc: OverflowError) -> JSONResponse:
     return JSONResponse(
         status_code=422,
