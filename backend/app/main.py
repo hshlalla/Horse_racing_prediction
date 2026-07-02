@@ -106,7 +106,9 @@ def create_app() -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         return response
 
-    from app.core.errors import overflow_exception_handler
+    from app.core.errors import overflow_exception_handler, rate_limit_exception_handler
+    from app.core.rate_limit import RateLimitExceeded
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
     app.add_exception_handler(OverflowError, overflow_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
 

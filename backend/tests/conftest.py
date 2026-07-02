@@ -1,3 +1,13 @@
+# Provide required settings via the environment BEFORE any app module is
+# imported, so `app.core.config` loads a valid Settings at import time.
+# (These are overridden per-test by _TEST_SETTINGS below where needed.)
+import os
+
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("JWT_SECRET", "test-secret-key-32-characters-long!")
+os.environ.setdefault("ENVIRONMENT", "testing")
+
 import pytest
 import pytest_asyncio
 from testcontainers.postgres import PostgresContainer
