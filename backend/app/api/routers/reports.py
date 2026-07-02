@@ -38,19 +38,26 @@ async def get_roi_report():
 async def get_today_bets(
     date: str = Query(None, description="YYYY-MM-DD (기본값: 오늘)"),
     min_edge: float = Query(0.0, description="최소 에지 필터 (0.0=전체, 0.05=5%+ 에지만)"),
+    track: str = Query(None, description="트랙 필터 SEOUL/BUSAN/JEJU (기본 전체)"),
 ):
-    """오늘 경주별 EV 순위 베팅 추천 — 배당/에지/AI확률 포함."""
+    """경주별 베팅 추천 — 백테스트 검증 전략(모델 본선마 승률순 + 에지 게이트).
+
+    단승=승률 1위 말, 복승=승률 상위 2마리 조합. ev_qualified는 본선마(승률
+    1위)의 에지가 min_edge 이상인지로 판정한다. 배당/에지/AI확률/역배확률 포함.
+    """
     if date is None:
         date = datetime.date.today().isoformat()
     target_date = datetime.datetime.strptime(date, "%Y-%m-%d").date()
 
     async with async_session_factory() as session:
-        result = await session.execute(
+        query = (
             select(Race)
             .options(selectinload(Race.entries))
             .where(Race.race_date == target_date)
-            .order_by(Race.post_time)
         )
+        if track:
+            query = query.where(Race.track == track.upper())
+        result = await session.execute(query.order_by(Race.post_time))
         races = list(result.scalars().all())
 
         bet_suggestions = []
@@ -67,11 +74,13 @@ async def get_today_bets(
             horse_to_num = {e.horse_id: e.program_number for e in race.entries}
             horse_to_odds = {e.horse_id: (e.morning_odds or 0.0) for e in race.entries}
 
-            # 에지 순서 정렬
-            sorted_by_edge = sorted(preds, key=lambda x: x.edge_score, reverse=True)
+            # 승률순 정렬 — 백테스트에서 검증한 전략은 "모델 본선마(승률 1위)에
+            # 에지가 있을 때 그 말/상위2에 베팅". 에지순 정렬은 미검증(역배 성격,
+            # -4% 백테스트)이라 승률순으로 정렬한다.
+            sorted_by_prob = sorted(preds, key=lambda x: x.win_probability, reverse=True)
 
             picks = []
-            for p in sorted_by_edge:
+            for p in sorted_by_prob:
                 odds = horse_to_odds.get(p.horse_id, 0.0)
                 ev = p.win_probability * odds  # expected value (배당기준)
                 picks.append({
@@ -88,9 +97,18 @@ async def get_today_bets(
                     "top_reasons": p.top_reasons,
                 })
 
-            # 에지 필터 적용
+            # 에지 필터: 본선마(승률 1위)의 에지가 min_edge 이상일 때만 추천
             top_pick = picks[0] if picks else None
-            ev_qualified = top_pick and top_pick["edge_score"] >= min_edge
+            ev_qualified = bool(top_pick and top_pick["edge_score"] >= min_edge)
+
+            # 복승(quinella) 추천 = 승률 상위 2마리 조합 (백테스트 최고 수익 전략)
+            quinella = None
+            if len(picks) >= 2:
+                quinella = {
+                    "numbers": [picks[0]["program_number"], picks[1]["program_number"]],
+                    "horse_names": [picks[0]["horse_name"], picks[1]["horse_name"]],
+                    "combined_win_prob": round(picks[0]["win_prob"] + picks[1]["win_prob"], 4),
+                }
 
             bet_suggestions.append({
                 "race_id": race.id,
@@ -99,6 +117,7 @@ async def get_today_bets(
                 "post_time": race.post_time.isoformat() if race.post_time else None,
                 "distance_m": race.distance_m,
                 "ev_qualified": ev_qualified,
+                "quinella": quinella,
                 "picks": picks[:5],  # 상위 5마리
             })
 
@@ -106,6 +125,7 @@ async def get_today_bets(
     return {
         "date": date,
         "min_edge": min_edge,
+        "track": track,
         "total_races": len(bet_suggestions),
         "qualified_races": len(qualified),
         "races": bet_suggestions,

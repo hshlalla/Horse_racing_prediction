@@ -19,6 +19,14 @@ const EDGE_PRESETS = [
   { label: "에지 10%+", value: 0.1 },
 ];
 
+// 백테스트상 서울만 수익 트랙 → 기본값 서울
+const TRACK_PRESETS = [
+  { label: "서울", value: "SEOUL" },
+  { label: "부산", value: "BUSAN" },
+  { label: "제주", value: "JEJU" },
+  { label: "전체", value: "" },
+];
+
 function EdgeBadge({ edge }: { edge: number }) {
   const pct = (edge * 100).toFixed(1);
   if (edge >= 0.1)
@@ -107,12 +115,23 @@ function RaceCard({ race, defaultOpen }: { race: any; defaultOpen?: boolean }) {
           </div>
           {top && (
             <p className="text-xs text-slate-400 mt-0.5">
-              추천:{" "}
+              단승:{" "}
               <span className="font-semibold text-slate-200">
                 {top.program_number}번 {top.horse_name}
               </span>{" "}
               · 배당{" "}
               <span className="text-amber-300 font-bold">{top.morning_odds}배</span>
+            </p>
+          )}
+          {race.quinella && (
+            <p className="text-xs text-slate-400 mt-0.5">
+              복승:{" "}
+              <span className="font-semibold text-teal-300">
+                {race.quinella.numbers[0]}-{race.quinella.numbers[1]}
+              </span>{" "}
+              <span className="text-slate-500">
+                ({race.quinella.horse_names[0]} · {race.quinella.horse_names[1]})
+              </span>
             </p>
           )}
         </div>
@@ -219,13 +238,15 @@ export default function InvestmentPage() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   // 기본값 5% — 백테스트상 서울 복승/단승이 에지 5%+에서 수익 전환되는 스윗스팟
   const [minEdge, setMinEdge] = useState(0.05);
+  // 기본값 서울 — 백테스트상 유일한 수익 트랙
+  const [track, setTrack] = useState("SEOUL");
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["today-bets", date, minEdge],
+    queryKey: ["today-bets", date, minEdge, track],
     queryFn: async () => {
-      const res = await fetch(
-        `/api/reports/today-bets?date=${date}&min_edge=${minEdge}`
-      );
+      const params = new URLSearchParams({ date, min_edge: String(minEdge) });
+      if (track) params.set("track", track);
+      const res = await fetch(`/api/reports/today-bets?${params}`);
       if (!res.ok) throw new Error("fetch failed");
       return res.json();
     },
@@ -256,8 +277,26 @@ export default function InvestmentPage() {
           </div>
         </div>
 
-        {/* Edge filter */}
+        {/* Track filter */}
         <div className="flex items-center gap-2 mt-3">
+          <span className="text-[11px] text-slate-500 mr-1 pl-[18px]">트랙</span>
+          {TRACK_PRESETS.map((p) => (
+            <button
+              key={p.value || "ALL"}
+              onClick={() => setTrack(p.value)}
+              className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold transition-colors ${
+                track === p.value
+                  ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                  : "bg-white/5 text-slate-500 border-white/10 hover:border-white/20"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Edge filter */}
+        <div className="flex items-center gap-2 mt-2">
           <Filter size={13} className="text-slate-500" />
           <span className="text-[11px] text-slate-500 mr-1">에지 필터</span>
           {EDGE_PRESETS.map((p) => (

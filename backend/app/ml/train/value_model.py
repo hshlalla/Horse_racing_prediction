@@ -26,7 +26,10 @@ class ValueModelShim:
         for c in self.cat_cols:
             if c in X.columns:
                 X[c] = pd.Categorical(X[c], categories=self.cat_mappings[c])
-        return self.m.predict(X)  # LGBMClassifier.predict returns P(class=1)
+        # LGBMClassifier.predict() returns 0/1 class labels; predict_proba()[:,1]
+        # is the actual P(class=1). Using .predict() collapsed this to a binary
+        # label and made upset_probability meaningless.
+        return self.m.predict_proba(X)[:, 1]
 
 
 def train_value_model(

@@ -189,6 +189,77 @@ def _print_report(stats, bet_types):
         print()
 
 
+VALUE_THRESHOLDS = [0.3, 0.5, 0.7, 0.9]
+UPSET_ODDS_MIN = 5.0  # value_model target = odds > 5 AND wins
+
+
+def run_value(models: dict, all_df: pd.DataFrame, meta: dict) -> None:
+    """Backtest the value model (Approach B): WIN bets on high upset-probability
+    longshots (odds >= 5). One bet per qualifying horse (not per race)."""
+    features = list(all_df.attrs["features"])
+
+    def _new():
+        return {"inv": 0, "ret": 0.0, "hits": 0, "bets": 0, "races": set()}
+
+    stats: dict = defaultdict(lambda: defaultdict(_new))  # [thr][scope]
+
+    # Winner program_number per race from payouts (win payout numbers).
+    for race_id, g in all_df.groupby("race_id", sort=False):
+        m = meta.get(race_id)
+        if m is None or len(g) < 3:
+            continue
+        track = m["track"]
+        model = models.get(track)
+        vm = getattr(model, "value_model", None) if model else None
+        if vm is None:
+            continue
+        payouts = m["payouts"]
+        win_nums = {p.get("numbers"): p["odds"] for p in payouts.get("win", [])}
+
+        g = g.reset_index(drop=True)
+        mfeats = [f for f in features if f in set(getattr(model, "feature_names_", features))]
+        try:
+            upset = np.asarray(vm.predict_proba(g[mfeats]), dtype=float)
+        except Exception:
+            continue
+
+        odds = g["morning_odds"].astype(float).values
+        for i in range(len(g)):
+            if odds[i] < UPSET_ODDS_MIN:
+                continue
+            num = str(int(g.loc[i, "program_number"]))
+            won = num in win_nums
+            ret = BET * win_nums[num] if won else 0.0
+            for thr in VALUE_THRESHOLDS:
+                if upset[i] < thr:
+                    continue
+                for scope in ("ALL", track):
+                    s = stats[thr][scope]
+                    s["inv"] += BET
+                    s["ret"] += ret
+                    s["hits"] += int(won)
+                    s["bets"] += 1
+                    s["races"].add(race_id)
+
+    print("\n=== VALUE MODEL (upset WIN, odds>=5) ===\n")
+    for thr in VALUE_THRESHOLDS:
+        print("=" * 66)
+        print(f"upset_prob >= {thr:.1f}")
+        print("=" * 66)
+        for scope in ["ALL"] + TRACKS:
+            s = stats[thr].get(scope)
+            if not s or s["bets"] == 0:
+                print(f"  [{scope}] no qualifying bets")
+                continue
+            roi = (s["ret"] - s["inv"]) / s["inv"] * 100 if s["inv"] else 0.0
+            hr = s["hits"] / s["bets"] * 100 if s["bets"] else 0.0
+            print(
+                f"  [{scope}]  bets {s['bets']:>4} over {len(s['races']):>4} races  "
+                f"WIN ROI {roi:+7.1f}%  hit {hr:5.1f}%  ret {s['ret']:>11,.0f}"
+            )
+        print()
+
+
 async def _validate(models: dict, all_df: pd.DataFrame, meta: dict, sample: int) -> None:
     """Cross-check batch top1 + edge against predict_race on a random sample."""
     from app.ml.predict.service import predict_race
@@ -241,6 +312,7 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--validate", type=int, default=0, help="validate against predict_race on N races")
     ap.add_argument("--since", type=str, default="", help="only backtest races on/after YYYY-MM-DD (out-of-sample)")
+    ap.add_argument("--value", action="store_true", help="backtest the value model (upset longshot WIN)")
     args = ap.parse_args()
 
     db_url = os.environ.get("DATABASE_URL", "")
@@ -287,6 +359,10 @@ async def main() -> None:
 
     if args.validate:
         await _validate(models, all_df, meta, args.validate)
+        return
+
+    if args.value:
+        run_value(models, all_df, meta)
         return
 
     run(models, all_df, meta)
