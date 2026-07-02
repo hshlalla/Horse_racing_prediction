@@ -78,9 +78,21 @@ function RaceCard({ race, defaultOpen }: { race: any; defaultOpen?: boolean }) {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-white/10">
+            <span
+              className={`text-xs font-bold px-2 py-0.5 rounded border ${
+                race.track === "SEOUL"
+                  ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                  : "text-slate-400 bg-slate-800 border-white/10"
+              }`}
+            >
+              {race.track === "SEOUL" ? "✓ " : ""}
               {trackNameMap[race.track] || race.track}
             </span>
+            {qualified && race.track !== "SEOUL" && (
+              <span className="text-[10px] text-amber-500/80 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                백테스트 손실 트랙
+              </span>
+            )}
             <span className="font-semibold text-slate-100 text-sm">
               제{race.race_number}경주
             </span>
@@ -205,7 +217,8 @@ function RaceCard({ race, defaultOpen }: { race: any; defaultOpen?: boolean }) {
 
 export default function InvestmentPage() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
-  const [minEdge, setMinEdge] = useState(0.0);
+  // 기본값 5% — 백테스트상 서울 복승/단승이 에지 5%+에서 수익 전환되는 스윗스팟
+  const [minEdge, setMinEdge] = useState(0.05);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["today-bets", date, minEdge],
@@ -218,8 +231,11 @@ export default function InvestmentPage() {
     },
   });
 
-  const qualified = data?.races?.filter((r: any) => r.ev_qualified) ?? [];
-  const others = data?.races?.filter((r: any) => !r.ev_qualified) ?? [];
+  // 백테스트상 서울만 수익 트랙 → 추천 목록에서 서울을 앞으로 정렬
+  const seoulFirst = (a: any, b: any) =>
+    (a.track === "SEOUL" ? 0 : 1) - (b.track === "SEOUL" ? 0 : 1);
+  const qualified = (data?.races?.filter((r: any) => r.ev_qualified) ?? []).slice().sort(seoulFirst);
+  const others = (data?.races?.filter((r: any) => !r.ev_qualified) ?? []).slice().sort(seoulFirst);
 
   return (
     <div className="max-w-3xl mx-auto min-h-screen bg-slate-950 text-slate-200 pb-28">
