@@ -97,9 +97,16 @@ async def get_today_bets(
                     "top_reasons": p.top_reasons,
                 })
 
+            # 배당 미입력 경주는 예측이 신뢰불가(모델이 배당 지배적) → 추천 제외
+            odds_available = any(
+                (e.morning_odds is not None) for e in race.entries
+            )
+
             # 에지 필터: 본선마(승률 1위)의 에지가 min_edge 이상일 때만 추천
             top_pick = picks[0] if picks else None
-            ev_qualified = bool(top_pick and top_pick["edge_score"] >= min_edge)
+            ev_qualified = bool(
+                odds_available and top_pick and top_pick["edge_score"] >= min_edge
+            )
 
             # 복승(quinella) 추천 = 승률 상위 2마리 조합 (백테스트 최고 수익 전략)
             quinella = None
@@ -118,6 +125,7 @@ async def get_today_bets(
                 "post_time": race.post_time.isoformat() if race.post_time else None,
                 "distance_m": race.distance_m,
                 "ev_qualified": ev_qualified,
+                "odds_available": odds_available,
                 "quinella": quinella,
                 "picks": picks[:5],  # 상위 5마리
             })

@@ -101,6 +101,11 @@ function RaceCard({ race, defaultOpen }: { race: any; defaultOpen?: boolean }) {
                 백테스트 손실 트랙
               </span>
             )}
+            {race.odds_available === false && (
+              <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded">
+                배당 미입력
+              </span>
+            )}
             <span className="font-semibold text-slate-100 text-sm">
               제{race.race_number}경주
             </span>
@@ -113,26 +118,35 @@ function RaceCard({ race, defaultOpen }: { race: any; defaultOpen?: boolean }) {
               </span>
             )}
           </div>
-          {top && (
-            <p className="text-xs text-slate-400 mt-0.5">
-              단승:{" "}
-              <span className="font-semibold text-slate-200">
-                {top.program_number}번 {top.horse_name}
-              </span>{" "}
-              · 배당{" "}
-              <span className="text-amber-300 font-bold">{top.morning_odds}배</span>
+          {race.odds_available === false ? (
+            <p className="text-xs text-rose-400/90 mt-0.5">
+              배당이 아직 입력되지 않아 예측이 신뢰불가입니다 (확률이 균일하게 나옴).
+              배당 크롤 후 다시 확인하세요.
             </p>
-          )}
-          {race.quinella && (
-            <p className="text-xs text-slate-400 mt-0.5">
-              복승:{" "}
-              <span className="font-semibold text-teal-300">
-                {race.quinella.numbers[0]}-{race.quinella.numbers[1]}
-              </span>{" "}
-              <span className="text-slate-500">
-                ({race.quinella.horse_names[0]} · {race.quinella.horse_names[1]})
-              </span>
-            </p>
+          ) : (
+            <>
+              {top && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  단승:{" "}
+                  <span className="font-semibold text-slate-200">
+                    {top.program_number}번 {top.horse_name}
+                  </span>{" "}
+                  · 배당{" "}
+                  <span className="text-amber-300 font-bold">{top.morning_odds}배</span>
+                </p>
+              )}
+              {race.quinella && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  복승:{" "}
+                  <span className="font-semibold text-teal-300">
+                    {race.quinella.numbers[0]}-{race.quinella.numbers[1]}
+                  </span>{" "}
+                  <span className="text-slate-500">
+                    ({race.quinella.horse_names[0]} · {race.quinella.horse_names[1]})
+                  </span>
+                </p>
+              )}
+            </>
           )}
         </div>
 
