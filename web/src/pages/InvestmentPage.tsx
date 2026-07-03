@@ -194,11 +194,13 @@ function RaceCard({ race, defaultOpen }: { race: any; defaultOpen?: boolean }) {
               >
                 {pick.morning_odds > 0 ? `${pick.morning_odds}x` : "-"}
               </span>
-              {/* 역배 확률: 배당 5배 이상 말에게만 의미 있음 */}
+              {/* 역배 확률: 배당 5배 이상 말에게만 의미 있음.
+                  value model 확률은 미보정(분포 0~0.7, 중앙값 ~0.28)이라 상대값으로만 봄.
+                  0.6+ = 상위 10%(실제 승률 ~14.5%, base 4.9%의 3배)만 강조. */}
               <span className="text-right">
                 {pick.upset_probability > 0 && pick.morning_odds >= 5.0 ? (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                    pick.upset_probability >= 0.05
+                    pick.upset_probability >= 0.6
                       ? "bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30"
                       : "text-slate-600"
                   }`}>

@@ -163,6 +163,78 @@ def run(models: dict, all_df: pd.DataFrame, meta: dict[int, dict]) -> None:
     _print_report(stats, bet_types)
 
 
+def _harville_pair(probs: np.ndarray, i: int, j: int) -> float:
+    """P(horses i and j both finish top-2, any order) via Harville."""
+    pi, pj = float(probs[i]), float(probs[j])
+    term = 0.0
+    if pi < 1.0:
+        term += pi * pj / (1.0 - pi)
+    if pj < 1.0:
+        term += pj * pi / (1.0 - pj)
+    return min(term, 0.99)
+
+
+def run_quinella_gate(models: dict, all_df: pd.DataFrame, meta: dict) -> None:
+    """Compare quinella ROI under two gates: (A) favorite win-edge >= thr
+    (current API) vs (B) quinella-specific edge = Harville pair prob
+    (model) - Harville pair prob (market) for the top-2 combo."""
+    features = list(all_df.attrs["features"])
+
+    def _new():
+        return {"inv": 0, "ret": 0.0, "hits": 0}
+
+    # stats[gate][thr][scope]
+    stats = {"favorite": defaultdict(lambda: defaultdict(_new)),
+             "quinella": defaultdict(lambda: defaultdict(_new))}
+
+    for race_id, g in all_df.groupby("race_id", sort=False):
+        m = meta.get(race_id)
+        if m is None or len(g) < 3:
+            continue
+        track = m["track"]
+        model = models.get(track)
+        if model is None:
+            continue
+        payouts = m["payouts"]
+        g = g.reset_index(drop=True)
+        probs = _score_race(model, g, features)
+        mkt = _market_probs(g["morning_odds"].values)
+        edge = probs - mkt
+        order = np.argsort(-probs)
+        i, j = int(order[0]), int(order[1])
+        nums = [str(int(g.loc[k, "program_number"])) for k in order]
+        top2 = set(nums[:2])
+        q_ret = _payout_return(payouts, "quinella", top2)
+
+        fav_edge = float(edge[i])
+        q_edge = _harville_pair(probs, i, j) - _harville_pair(mkt, i, j)
+        gate_vals = {"favorite": fav_edge, "quinella": q_edge}
+
+        for gate, val in gate_vals.items():
+            for thr in EDGE_THRESHOLDS:
+                if val < thr:
+                    continue
+                for scope in ("ALL", track):
+                    s = stats[gate][thr][scope]
+                    s["inv"] += BET
+                    s["ret"] += q_ret
+                    s["hits"] += int(q_ret > 0)
+
+    print("\n=== QUINELLA GATE COMPARISON (bet = top-2 by win prob) ===")
+    for gate in ("favorite", "quinella"):
+        label = "본선마 win-edge 게이트" if gate == "favorite" else "복승 Harville-edge 게이트"
+        print(f"\n--- {gate} gate ({label}) ---")
+        for thr in EDGE_THRESHOLDS:
+            for scope in ("ALL", "SEOUL"):
+                s = stats[gate][thr].get(scope)
+                if not s or s["inv"] == 0:
+                    continue
+                roi = (s["ret"] - s["inv"]) / s["inv"] * 100
+                races = s["inv"] // BET
+                hr = s["hits"] / races * 100 if races else 0
+                print(f"  edge>={thr:.2f} [{scope}]  ROI {roi:+7.1f}%  hit {hr:5.1f}%  races {races}")
+
+
 def _print_report(stats, bet_types):
     for thr in EDGE_THRESHOLDS:
         print("=" * 70)
@@ -313,6 +385,7 @@ async def main() -> None:
     ap.add_argument("--validate", type=int, default=0, help="validate against predict_race on N races")
     ap.add_argument("--since", type=str, default="", help="only backtest races on/after YYYY-MM-DD (out-of-sample)")
     ap.add_argument("--value", action="store_true", help="backtest the value model (upset longshot WIN)")
+    ap.add_argument("--qgate", action="store_true", help="compare quinella gating strategies")
     args = ap.parse_args()
 
     db_url = os.environ.get("DATABASE_URL", "")
@@ -363,6 +436,10 @@ async def main() -> None:
 
     if args.value:
         run_value(models, all_df, meta)
+        return
+
+    if args.qgate:
+        run_quinella_gate(models, all_df, meta)
         return
 
     run(models, all_df, meta)
