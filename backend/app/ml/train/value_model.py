@@ -15,13 +15,16 @@ UPSET_ODDS_THRESHOLD = 5.0  # 배당 5배 이상을 "업셋" 기준으로
 
 
 class ValueModelShim:
-    def __init__(self, m, cat_cols=None, cat_mappings=None):
+    def __init__(self, m, cat_cols=None, cat_mappings=None, calibrator=None):
         self.m = m
         self.cat_cols = cat_cols or []
         self.cat_mappings = cat_mappings or {}
+        # Optional isotonic calibrator mapping raw P(class=1) → true upset rate.
+        # LGBM with scale_pos_weight produces inflated scores (median ~0.28 for a
+        # ~5% base rate); calibration makes upset_probability an absolute number.
+        self.calibrator = calibrator
 
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Return P(upset_win) for each horse. Shape: (n,)"""
+    def _raw_proba(self, X: pd.DataFrame) -> np.ndarray:
         X = X.copy()
         for c in self.cat_cols:
             if c in X.columns:
@@ -30,6 +33,14 @@ class ValueModelShim:
         # is the actual P(class=1). Using .predict() collapsed this to a binary
         # label and made upset_probability meaningless.
         return self.m.predict_proba(X)[:, 1]
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Return calibrated P(upset_win) for each horse. Shape: (n,)"""
+        raw = self._raw_proba(X)
+        cal = getattr(self, "calibrator", None)
+        if cal is not None:
+            return np.clip(cal.predict(raw), 0.0, 1.0)
+        return raw
 
 
 def train_value_model(
@@ -109,4 +120,16 @@ def train_value_model(
         ],
     )
 
-    return ValueModelShim(model, cat_in_use, cat_mappings)
+    # Fit an isotonic calibrator on the val set so predict_proba returns an
+    # absolute upset rate rather than the inflated scale_pos_weight score.
+    calibrator = None
+    try:
+        from sklearn.isotonic import IsotonicRegression
+        raw_val = model.predict_proba(X_val)[:, 1]
+        if len(set(y_val.tolist())) == 2:
+            calibrator = IsotonicRegression(out_of_bounds="clip")
+            calibrator.fit(raw_val, y_val)
+    except Exception:
+        calibrator = None
+
+    return ValueModelShim(model, cat_in_use, cat_mappings, calibrator=calibrator)
