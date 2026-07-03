@@ -59,7 +59,12 @@ def _eval(track_train, track_val, features, target):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--track", default="SEOUL", choices=["SEOUL", "BUSAN", "JEJU"])
+    ap.add_argument("--candidates", default="", help="comma-separated subset to test (default: all)")
     args = ap.parse_args()
+
+    global CANDIDATES
+    if args.candidates:
+        CANDIDATES = [c.strip() for c in args.candidates.split(",") if c.strip()]
 
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:

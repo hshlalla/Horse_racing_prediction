@@ -8,11 +8,21 @@ import os
 # health features. Dropped (all-zero importance across SEOUL/BUSAN/JEJU champions):
 #   body_weight_kg, body_weight_delta_kg, horse_age, horse_sex, track, surface,
 #   grade, humidity, sire_win_rate, odds_drift, jockey_changed
-# Dropped (workout data structurally sparse ~8% coverage, train/val mismatch):
+# Dropped (workout data structurally sparse, train/val mismatch):
 #   recent_workout_time_s, recent_workout_rank, swim_count_recent,
 #   recent_workout_count_30d, start_training_passed, days_since_start_training
-# These columns are still produced by the SQL/feature code so they can be re-added
-# once their underlying data is dense enough to measure.
+# 2026-07-03 investigation (do NOT re-attempt densifying these):
+#   - start_training: KRA published "출발훈련:YYMMDD(결과)" only in early-2021
+#     board PDFs (last DB record 2021-04-15) then REMOVED the field. Every PDF
+#     from ~2021-05 onward (board _all AND individual chulma, all tracks/years)
+#     has zero "출발훈련" text. The data source is discontinued — permanently
+#     undensifiable, not a parser bug.
+#   - swim ("수영:N회") IS present in all PDFs and already captured; it is
+#     genuinely rare (~1% of horses swim-train), not a coverage gap.
+#   Ablation (scripts/ablation_start_swim.py, SEOUL): adding these HURTS the
+#   ensemble (val_log_loss 1.815→1.940 all four; swim-only 1.815→1.865). The
+#   ensemble is CatBoost-dominated (~0.95) and CatBoost is neutral/worse on them.
+#   Columns are still produced by the SQL so historical 2021 rows keep the data.
 FEATURES = [
     # --- Core market / form features (proven importance) ---
     'jockey_id', 'trainer_id', 'program_number', 'distance_m', 'field_size',
