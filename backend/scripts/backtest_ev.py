@@ -11,10 +11,13 @@ Then simulates flat 1,000 KRW bets on the model's top picks (WIN=top1,
 QUINELLA=top2, TRIO=top3) against stored payouts, sweeping a min_edge filter so
 we can see whether "only bet when the model sees value" improves ROI.
 
-Divergence from production: cold-start inverse-odds blending (service.py step 7)
-is skipped. It only moves probabilities for horses with <3 career starts. The
---validate flag cross-checks a sample of races against predict_race so we know
-the divergence is negligible before trusting the numbers.
+Cold-start inverse-odds blending (service.py step 7) IS replicated here via
+career_starts. The only residual divergence from production is that
+career_starts is dataset.py's per-horse cumcount (rows in the loaded window)
+whereas service uses a live count of all prior RaceResults — these differ only
+for horses with <3 starts whose earliest races fall outside the dataset window.
+The --validate flag cross-checks a sample of races against predict_race
+(96.7% top-1 match, mean |edge diff| 0.028) so the residual is negligible.
 
 Run:
     DATABASE_URL=... uv run python -m scripts.backtest_ev
@@ -261,6 +264,10 @@ def _print_report(stats, bet_types):
         print()
 
 
+# Thresholds on the RAW (uncalibrated) value score. run_value gates on
+# vm._raw_proba, not predict_proba, so these stay valid regardless of whether
+# an isotonic calibrator has been attached (calibration would shrink the scale
+# to the ~4% base rate and make these thresholds select nothing).
 VALUE_THRESHOLDS = [0.3, 0.5, 0.7, 0.9]
 UPSET_ODDS_MIN = 5.0  # value_model target = odds > 5 AND wins
 
@@ -291,7 +298,8 @@ def run_value(models: dict, all_df: pd.DataFrame, meta: dict) -> None:
         g = g.reset_index(drop=True)
         mfeats = [f for f in features if f in set(getattr(model, "feature_names_", features))]
         try:
-            upset = np.asarray(vm.predict_proba(g[mfeats]), dtype=float)
+            # Raw score (pre-calibration) so VALUE_THRESHOLDS stay meaningful.
+            upset = np.asarray(vm._raw_proba(g[mfeats]), dtype=float)
         except Exception:
             continue
 

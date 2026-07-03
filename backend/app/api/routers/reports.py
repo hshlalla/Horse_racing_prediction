@@ -107,7 +107,8 @@ async def get_today_bets(
                 quinella = {
                     "numbers": [picks[0]["program_number"], picks[1]["program_number"]],
                     "horse_names": [picks[0]["horse_name"], picks[1]["horse_name"]],
-                    "combined_win_prob": round(picks[0]["win_prob"] + picks[1]["win_prob"], 4),
+                    # sum of the two horses' individual win probs (not a joint prob)
+                    "sum_win_prob": round(picks[0]["win_prob"] + picks[1]["win_prob"], 4),
                 }
 
             bet_suggestions.append({

@@ -31,6 +31,7 @@ def main():
 
     _tr, val_df, _te, features, _t = load_dataset_pg(db_url)
 
+    saved_any = False
     for track in TRACKS:
         metrics = get_production_metrics(track)
         if not metrics:
@@ -65,12 +66,25 @@ def main():
 
         calibrated = np.clip(cal.predict(raw), 0.0, 1.0)
         base = target.mean()
-        with open(path, "wb") as f:
+        # Atomic replace so an interrupted dump can't corrupt the live artifact.
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
             pickle.dump(ens, f)
+        os.replace(tmp, path)
+        saved_any = True
         print(f"[{track}] calibrated & saved {os.path.basename(path)}")
         print(f"    raw mean {raw.mean():.3f} (p90 {np.percentile(raw,90):.3f})"
               f" → calibrated mean {calibrated.mean():.3f} (p90 {np.percentile(calibrated,90):.3f})"
               f" | actual base rate {base:.3f}")
+
+    # Bump production.json mtime so a running server hot-reloads the models
+    # (service._get_model caches keyed on production.json mtime, not the .pkl).
+    if saved_any:
+        from app.ml.train.promote import _production_json_path
+        pj = _production_json_path()
+        if pj.exists():
+            os.utime(pj, None)
+            print(f"touched {pj} → running servers will reload on next request")
 
 
 if __name__ == "__main__":
