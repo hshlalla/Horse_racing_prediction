@@ -85,6 +85,7 @@ class RaceEntry(Base):
     carry_weight_kg: Mapped[Optional[float]] = mapped_column(Float)
     body_weight_kg: Mapped[Optional[float]] = mapped_column(Float)
     morning_odds: Mapped[Optional[float]] = mapped_column(Float)
+    market_fav_rank: Mapped[Optional[int]] = mapped_column(Integer)  # 당일 인기순위 1/2/3, else NULL
 
     race: Mapped["Race"] = relationship(back_populates="entries")
     horse: Mapped["Horse"] = relationship()
@@ -160,6 +161,33 @@ class HealthRecord(Base):
     record_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     condition: Mapped[Optional[str]] = mapped_column(String(50))
     count: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+
+class StartTrainingRecord(Base):
+    __tablename__ = "start_training_records"
+    __table_args__ = (UniqueConstraint("horse_id", "train_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    horse_id: Mapped[int] = mapped_column(Integer, ForeignKey("horses.id"), nullable=False)
+    train_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    rider: Mapped[Optional[str]] = mapped_column(String(30))
+    remark: Mapped[Optional[str]] = mapped_column(String(50))     # 양호/진입불량/출발자세불량 …
+    passed: Mapped[Optional[bool]] = mapped_column(Boolean)       # 양호→True, *불량→False
+    equipment: Mapped[Optional[str]] = mapped_column(String(50))  # 출발장구
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+
+class PreRaceWorkout(Base):
+    __tablename__ = "pre_race_workouts"
+    __table_args__ = (UniqueConstraint("race_id", "horse_id", "day_label"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    race_id: Mapped[int] = mapped_column(Integer, ForeignKey("races.id"), nullable=False)
+    horse_id: Mapped[int] = mapped_column(Integer, ForeignKey("horses.id"), nullable=False)
+    day_label: Mapped[str] = mapped_column(String(10), nullable=False)  # e.g. "전주-월", "금주-토"
+    rider: Mapped[Optional[str]] = mapped_column(String(30))
+    count: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
 
