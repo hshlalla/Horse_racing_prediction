@@ -9,6 +9,7 @@ catboost_info/
 roi_cache.json
 dump.sql
 *.html
+!tests/fixtures/*.html
 
 # Model binaries
 models/
