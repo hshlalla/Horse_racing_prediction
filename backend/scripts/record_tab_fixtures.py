@@ -25,6 +25,7 @@ REF = {"meet": "1", "rcDate": "20260705", "rcNo": "6", "Act": "02", "Sub": "1"}
 
 
 async def _fetch(client: httpx.AsyncClient, url: str, method: str = "POST", data=None) -> str:
+    last_exc: Exception | None = None
     for attempt in range(3):
         try:
             if method == "POST":
@@ -35,9 +36,11 @@ async def _fetch(client: httpx.AsyncClient, url: str, method: str = "POST", data
             if "정상적인 접근" in html or len(html) < 2000:
                 raise RuntimeError("error page")
             return html
-        except Exception:
-            await asyncio.sleep(1.5 ** attempt)
-    raise RuntimeError(f"failed: {url}")
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                await asyncio.sleep(1.5 ** attempt)
+    raise RuntimeError(f"failed after 3 attempts: {url}") from last_exc
 
 
 async def main() -> None:
